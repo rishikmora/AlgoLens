@@ -1,0 +1,369 @@
+@import "tailwindcss";
+
+/* ═══════════════════════════════════════════════════════════════════
+   RishAlgo AI — design tokens
+
+   Colour is declared once here and overridden wholesale for light mode
+   further down, so every surface in the app is theme-aware without any
+   component needing to know a theme exists.
+
+   Accent discipline — the rule that keeps the interface calm:
+     signal (lime)  primary action · success · the element executing right now
+     ai     (violet) anything the model produced
+     warn   (amber)  attention, comparisons in flight
+     danger (coral)  failure, destructive writes
+     info   (azure)  neutral data
+   Nothing else gets colour. Chrome is greyscale.
+   ═══════════════════════════════════════════════════════════════════ */
+
+@theme {
+  /* ── Surfaces: each step forward is lighter ── */
+  --color-base: #0a0b0d;
+  --color-sunken: #050607;
+  --color-raised: #111316;
+  --color-overlay: #171a1e;
+  --color-elevated: #1e2227;
+  --color-hover: #23272d;
+
+  /* ── Text ── */
+  --color-primary: #f0ede7;
+  --color-secondary: #a8a49b;
+  --color-tertiary: #74716a;
+  --color-faint: #4a4842;
+
+  /* ── Borders ── */
+  --color-hairline: #1c1f24;
+  --color-edge: #262a30;
+  --color-edge-strong: #363b43;
+
+  /* ── Accents ── */
+  --color-signal: #b8f060;
+  --color-signal-dim: #8ab83c;
+  --color-on-signal: #0a0b0d;
+  --color-ai: #c9a3ff;
+  --color-warn: #f5b544;
+  --color-danger: #ff6f4d;
+  --color-info: #5fa8ff;
+  --color-mint: #4dd9c0;
+
+  /* ── Legacy aliases: the first build's names, remapped.
+        Existing pages inherit the new palette untouched. ── */
+  --color-bg0: var(--color-base);
+  --color-bg1: var(--color-raised);
+  --color-bg2: var(--color-overlay);
+  --color-bg3: var(--color-elevated);
+  --color-bg4: var(--color-hover);
+  --color-line: var(--color-edge);
+  --color-line2: var(--color-hairline);
+  --color-ink0: var(--color-primary);
+  --color-ink1: var(--color-secondary);
+  --color-ink2: var(--color-tertiary);
+  --color-ink3: var(--color-faint);
+  --color-lime: var(--color-signal);
+  --color-lime2: var(--color-signal-dim);
+  --color-violet: var(--color-ai);
+  --color-teal: var(--color-mint);
+  --color-coral: var(--color-danger);
+  --color-amber: var(--color-warn);
+  --color-azure: var(--color-info);
+
+  /* ── Type ── */
+  --font-display: var(--font-instrument), Georgia, serif;
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, Consolas, monospace;
+
+  --text-2xs: 0.6875rem;      /* 11 — badges, gutters */
+  --text-2xs--line-height: 1.35;
+  --text-2xs--letter-spacing: 0.01em;
+  --text-xs: 0.75rem;         /* 12 — dense metadata */
+  --text-xs--line-height: 1.45;
+  --text-sm: 0.8125rem;       /* 13 — secondary body */
+  --text-sm--line-height: 1.55;
+  --text-base: 0.875rem;      /* 14 — body */
+  --text-base--line-height: 1.6;
+  --text-md: 0.9375rem;       /* 15 — lead body, card titles */
+  --text-md--line-height: 1.55;
+  --text-lg: 1.0625rem;       /* 17 */
+  --text-lg--line-height: 1.45;
+  --text-xl: 1.25rem;         /* 20 */
+  --text-xl--line-height: 1.3;
+  --text-2xl: 1.625rem;       /* 26 */
+  --text-2xl--line-height: 1.2;
+  --text-3xl: 2.125rem;       /* 34 */
+  --text-3xl--line-height: 1.12;
+  --text-4xl: 2.875rem;       /* 46 */
+  --text-4xl--line-height: 1.05;
+  --text-5xl: 3.75rem;        /* 60 */
+  --text-5xl--line-height: 0.98;
+
+  --radius-xs: 3px;
+  --radius-sm: 5px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  --ease-out: cubic-bezier(0.2, 0.7, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.3, 0.64, 1);
+}
+
+/* ── Light theme ─────────────────────────────────────────────────── */
+[data-theme="light"] {
+  --color-base: #fcfbf9;
+  --color-sunken: #f1efea;
+  --color-raised: #ffffff;
+  --color-overlay: #ffffff;
+  --color-elevated: #f4f2ee;
+  --color-hover: #eae7e1;
+
+  --color-primary: #14161a;
+  --color-secondary: #55524c;
+  --color-tertiary: #7d7a73;
+  --color-faint: #a9a59d;
+
+  --color-hairline: #eae7e1;
+  --color-edge: #dfdbd3;
+  --color-edge-strong: #c8c3b9;
+
+  --color-signal: #4f7d09;
+  --color-signal-dim: #3d6206;
+  --color-on-signal: #ffffff;
+  --color-ai: #7040c0;
+  --color-warn: #9a6206;
+  --color-danger: #c8391a;
+  --color-info: #1a63c4;
+  --color-mint: #0f7a68;
+}
+
+/* ── Base ────────────────────────────────────────────────────────── */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+html {
+  color-scheme: dark;
+}
+[data-theme="light"] {
+  color-scheme: light;
+}
+
+html,
+body {
+  background: var(--color-base);
+  color: var(--color-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Theme swaps are instant. Cross-fading every surface smears the whole
+   page, and a transition that gets interrupted can strand an element on
+   the previous palette. Suppress transitions for the swap frame instead. */
+.theme-switching *,
+.theme-switching *::before,
+.theme-switching *::after {
+  transition: none !important;
+  animation-duration: 0s !important;
+}
+
+::selection {
+  background: var(--color-signal);
+  color: var(--color-on-signal);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-signal);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-edge);
+  border: 3px solid var(--color-base);
+  border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-edge-strong);
+}
+
+/* Numerals should never reflow as values tick. */
+.tnum,
+input[type="range"] + *,
+.font-mono {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Utilities ───────────────────────────────────────────────────── */
+
+/* The single most important detail in a dark UI: a 1px top highlight
+   makes a panel read as a physical surface rather than an outline. */
+@utility surface {
+  background: var(--color-raised);
+  border: 1px solid var(--color-edge);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.035),
+    0 1px 2px rgb(0 0 0 / 0.22);
+}
+[data-theme="light"] .surface {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.9),
+    0 1px 2px rgb(0 0 0 / 0.05);
+}
+
+@utility surface-raised {
+  background: var(--color-overlay);
+  border: 1px solid var(--color-edge);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.045),
+    0 6px 22px -8px rgb(0 0 0 / 0.55);
+}
+[data-theme="light"] .surface-raised {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.9),
+    0 6px 22px -10px rgb(0 0 0 / 0.14);
+}
+
+@utility eyebrow {
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--color-tertiary);
+}
+
+@utility glow-signal {
+  box-shadow: 0 0 0 1px var(--color-signal), 0 0 22px -6px var(--color-signal);
+}
+
+/* ── Motion ──────────────────────────────────────────────────────── */
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.rise {
+  animation: rise 0.4s var(--ease-out) both;
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.breathe {
+  animation: breathe 2.2s ease-in-out infinite;
+}
+
+@keyframes sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(220%);
+  }
+}
+.sweep::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgb(184 240 96 / 0.14),
+    transparent
+  );
+  animation: sweep 2.4s var(--ease-out) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ── Ambient background ──────────────────────────────────────────── */
+
+.grid-bg {
+  background-image:
+    linear-gradient(var(--color-hairline) 1px, transparent 1px),
+    linear-gradient(90deg, var(--color-hairline) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse 90% 60% at 50% 0%, #000 25%, transparent 78%);
+}
+
+/* ── Range inputs: consistent across browsers ────────────────────── */
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 3px;
+  background: var(--color-elevated);
+  border-radius: 99px;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  height: 13px;
+  width: 13px;
+  border-radius: 99px;
+  background: var(--color-signal);
+  border: 2px solid var(--color-base);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.4);
+  transition: transform 0.15s var(--ease-spring);
+}
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.22);
+}
+input[type="range"]::-moz-range-thumb {
+  height: 13px;
+  width: 13px;
+  border-radius: 99px;
+  background: var(--color-signal);
+  border: 2px solid var(--color-base);
+}
+
+/* ── Form controls inherit the theme ─────────────────────────────── */
+
+select,
+input,
+textarea {
+  color-scheme: inherit;
+}
+select option {
+  background: var(--color-overlay);
+  color: var(--color-primary);
+}
+
+/* ── Monaco ──────────────────────────────────────────────────────── */
+
+.monaco-editor,
+.monaco-editor .margin,
+.monaco-editor-background {
+  background: var(--color-raised) !important;
+}
