@@ -38,6 +38,34 @@ Visualization / Debug panel.
 - On an accepted submission the panel switches to the **visual replay** rather than just
   printing "Accepted".
 
+### Replay your own solution (`/problems/[slug]` → Replay)
+
+An accepted submission does not print "Accepted" and stop — it opens the **Replay** tab and
+steps through *your* code against a real test case: the executing line highlighted, your
+variables updating live (including `Map` and `Set` contents), the call stack growing and
+shrinking, the heap, and running op counters. On a failed submission it auto-selects the
+**first failing case**, which is the one you actually want to watch.
+
+This runs on the interpreter below, not on a canned animation of the textbook algorithm.
+
+### AI Pair Programmer
+
+Not a chatbot. It reads what you are typing (debounced ~1s) and points at a **line number**:
+a `while` that never advances its condition variable, `i <= arr.length`, `=` where `===` was
+meant, `.sort()` with no comparator, `(lo + hi) / 2` overflow, mutation during iteration,
+recursion on a DP problem with no memo, nested loops on a hash-map problem. Click a note to
+jump the cursor there.
+
+Every rule is a pattern match against a real failure mode, and it is deliberately
+conservative — staying quiet beats crying wolf while someone is mid-thought.
+
+### Daily AI Coach (`/`)
+
+Reads your history and issues a three-problem mission for today, with the observation that
+justified it: which topics you failed on recently, which you have never attempted, and the
+weakest axis of your last mock interview. Every claim traces back to a stored submission or
+report, so it never tells you that you "struggled with DP" unless you did.
+
 ### Visual debugger (`/problems/[slug]` → Debug)
 
 A JavaScript-subset **lexer → parser → tree-walking interpreter** (`src/lib/interpreter.ts`)
@@ -47,10 +75,14 @@ array write and stack frame. That buys you what `print()` cannot: **stepping bac
 Panels: source with the executing line highlighted, variables in the current frame, call
 stack with depth, heap arrays, `print()` output, and live op/comparison/write counters.
 
-Supports `let`/`const`/`var`, `if`/`else`, `while`, `for`, functions, recursion, arrays,
-`+ - * / %`, comparisons, `&& ||`, `++ --`, compound assignment, member and index access,
+Supports `let`/`const`/`var`, `if`/`else`, `while`, `for`, `for…of`, functions, recursion,
+arrays, **object literals**, **`new Map()` / `new Set()`** with their methods, `+ - * / %`,
+comparisons, `&& ||`, `++ --`, compound assignment, member/index access and assignment,
 plus builtins `print len push pop max min abs floor ceil sqrt`. Guards against runaway
 loops (8,000-step budget) and infinite recursion (180-frame limit).
+
+The watch panel merges the whole scope chain of the innermost frame, so a `const seen`
+declared inside a function body is visible — not hidden in a child environment.
 
 ### Visualizer (`/visualize`)
 
@@ -80,23 +112,33 @@ from the same problem data.
 
 ### AI code review
 
-Runs on submit. Every number is **derived from static analysis of your source**, not from a
-model, so it is reproducible: correctness from the test results, optimization from loop
-nesting depth and linear scans hidden inside loops, naming from short identifiers,
-readability from line length and comment ratio, edge cases from detected guard patterns.
+Runs on submit and scores six axes — Correctness, Performance, Readability,
+**Maintainability**, Naming, Edge Cases — plus a named **Alternative approach** with its
+trade-off, chosen from *this* problem's topics (hash map → "sort then two pointers, O(1)
+space but you lose the indices"; DP recursion with no cache → "memoize or go bottom-up"; DP
+table → "collapse it to O(1)").
+
+Every number is **derived from static analysis of your source** against the problem's own
+target complexity and constraints — not from a model — so it is reproducible.
 
 ### Mock interviews (`/interview`)
 
-Nine company packs (Google, Amazon, Meta, Microsoft, Atlassian, Adobe, Uber, Flipkart,
-Goldman Sachs), each with its own interviewer persona, scored signals and round structure.
-Three modes: **DSA**, **Behavioral**, and **Resume-based** (paste a resume; project names
-are extracted and asked about by name).
+Ten company packs (Google, Amazon, Meta, Microsoft, Atlassian, Adobe, Uber, Flipkart,
+Rubrik, Goldman Sachs), each with its own interviewer persona, scored signals and round
+structure. Three modes: **DSA**, **Behavioral**, and **Resume-based** (upload a `.txt`/`.md`
+resume or paste it; project names are extracted and asked about by name).
 
 The session follows a real interview shape — welcome → introduction → problem → coding →
 optimization → follow-up → behavioral → wrap-up — with:
 
 - **Voice both ways.** The interviewer speaks (speech synthesis); your microphone answers
   are transcribed (speech recognition). Browser-native, no vendor key. You can always type.
+- **Filler-word scoring.** "um", "like", "basically", "you know" are counted as a percentage
+  of words spoken — density, not a raw count — and feed a Fluency axis. Under 2% is clean;
+  over 6% gets called out.
+- **STAR scoring** on behavioral and resume rounds: Situation / Task / Action / Result are
+  each detected from the language people actually use, and the report names which one you
+  skipped. (Result is the one candidates drop most.)
 - **Live coaching** triggered by behavior: silence over 25s, coding past 120 characters
   without stating complexity, coding before describing an approach.
 - **A live editor the interviewer can see**, with Run tests wired to the same judge.
@@ -108,12 +150,14 @@ optimization → follow-up → behavioral → wrap-up — with:
 
 ### Everything else
 
-- `/dashboard` — solved by difficulty, acceptance, 12-week activity heatmap, weak topics,
-  interview readiness, per-company readiness, XP/levels/coins/streak/badges.
+- `/dashboard` — solved by difficulty, acceptance, 12-week activity heatmap, weak topics
+  (each listing the **specific unsolved problems** to fix it), interview readiness,
+  per-company readiness bars, XP/levels/coins/streak/badges.
 - `/learn` — a 14-topic roadmap as a prerequisite DAG that unlocks as you solve.
 - `/contests` — upcoming, virtual rounds, rating history, leaderboard.
-- `/profile` — shareable recruiter-facing profile.
-- `/whiteboard` — canvas sketching with **Claude vision** reading the drawing back to you.
+- `/profile` and `/profile/<handle>` — shareable recruiter-facing profile.
+- `/whiteboard` — canvas sketching with **Claude vision** reading the drawing back to you,
+  then asking *you* a question about it rather than just narrating.
 - `/admin` — content and model configuration (read-only).
 
 Progress persists to `localStorage`; interview setup to `sessionStorage`.
@@ -133,6 +177,9 @@ gap is.
 | **Community discussion** | Backend + auth | Discussion tab says so; sample threads are dimmed |
 | **Live contests** | Scheduler + backend | Contest history is labelled seeded demo data |
 | **RAG over algorithm explanations** | Vector store | Tutor uses the problem's own editorial instead |
+| **PDF resume upload** | A server-side PDF text extractor | Upload accepts `.txt`/`.md`; a `.pdf` is refused with an explanation rather than silently failing |
+| **System design section** | Whole feature (TinyURL, Uber, WhatsApp…) | Not started — flagged "Future" in the brief |
+| **Live contest submissions & friends** | Realtime backend | Leaderboard is seeded demo data, labelled as such |
 
 Nine problems ship in the seed set (`src/data/problems.ts`), each with full description,
 constraints, examples, four graded hints, editorial and 4–6 test cases.

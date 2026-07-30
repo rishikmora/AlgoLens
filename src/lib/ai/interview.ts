@@ -46,6 +46,11 @@ export interface SessionMetrics {
   mentionedEdgeCases: boolean;
   longestSilence: number;
   hintsUsed: number;
+  /** Total words spoken, so filler density is meaningful rather than a raw count. */
+  wordCount: number;
+  fillerCount: number;
+  /** Which STAR components the candidate's answers actually covered. */
+  star: { situation: boolean; task: boolean; action: boolean; result: boolean };
 }
 
 export const emptyMetrics = (): SessionMetrics => ({
@@ -60,19 +65,52 @@ export const emptyMetrics = (): SessionMetrics => ({
   mentionedEdgeCases: false,
   longestSilence: 0,
   hintsUsed: 0,
+  wordCount: 0,
+  fillerCount: 0,
+  star: { situation: false, task: false, action: false, result: false },
 });
 
 const COMPLEXITY_RE = /\b(o\s*\(|big.?o|complexity|linear|logarithmic|quadratic|constant time|n log n|amortized)\b/i;
 const EDGE_RE = /\b(edge case|empty|null|overflow|boundary|duplicate|negative|single element|off.by.one)\b/i;
 
+/** Verbal fillers. Multi-word phrases are matched before single words. */
+const FILLERS = [
+  /\byou know\b/gi, /\bi mean\b/gi, /\bkind of\b/gi, /\bsort of\b/gi,
+  /\bor something\b/gi, /\bi guess\b/gi,
+  /\bum+\b/gi, /\buh+\b/gi, /\berm+\b/gi, /\bhmm+\b/gi,
+  /\blike\b/gi, /\bbasically\b/gi, /\bactually\b/gi, /\bliterally\b/gi,
+  /\bobviously\b/gi, /\bjust\b/gi, /\bright\?/gi,
+];
+
+export function countFillers(text: string): number {
+  return FILLERS.reduce((n, re) => n + (text.match(re)?.length ?? 0), 0);
+}
+
+/* STAR detection — looks for the language people actually use for each part. */
+const STAR_RE = {
+  situation: /\b(at my|when i was|during|we were|the project|last (year|semester|internship)|context was)\b/i,
+  task: /\b(my (job|task|role|responsibility)|i had to|i was asked|the goal was|i needed to|we needed to)\b/i,
+  action: /\b(i (built|wrote|designed|implemented|refactored|led|proposed|debugged|migrated|decided)|so i|i then)\b/i,
+  result: /\b(as a result|which (reduced|improved|increased|cut)|we shipped|ended up|the outcome|by \d+ ?%|\d+ ?% (faster|fewer|more|less))\b/i,
+};
+
 export function scanCandidateSpeech(text: string, m: SessionMetrics): SessionMetrics {
+  const words = text.split(/\s+/).filter(Boolean).length;
   return {
     ...m,
     candidateTurns: m.candidateTurns + 1,
     // ~2.5 words per second is a normal speaking pace.
-    spokenSeconds: m.spokenSeconds + text.split(/\s+/).filter(Boolean).length / 2.5,
+    spokenSeconds: m.spokenSeconds + words / 2.5,
+    wordCount: m.wordCount + words,
+    fillerCount: m.fillerCount + countFillers(text),
     mentionedComplexity: m.mentionedComplexity || COMPLEXITY_RE.test(text),
     mentionedEdgeCases: m.mentionedEdgeCases || EDGE_RE.test(text),
+    star: {
+      situation: m.star.situation || STAR_RE.situation.test(text),
+      task: m.star.task || STAR_RE.task.test(text),
+      action: m.star.action || STAR_RE.action.test(text),
+      result: m.star.result || STAR_RE.result.test(text),
+    },
   };
 }
 
@@ -235,20 +273,48 @@ export function buildReport(m: SessionMetrics, mode: InterviewMode): InterviewRe
     (m.mentionedComplexity ? 92 : 45) * 0.7 + solveRatio * 100 * 0.3,
   );
 
+  // Filler density: under ~2% of words is clean speech, over ~8% is distracting.
+  const fillerPct = m.wordCount > 0 ? (m.fillerCount / m.wordCount) * 100 : 0;
+  const fluencyPenalty = m.wordCount < 25 ? 0 : Math.min(30, Math.max(0, (fillerPct - 2) * 3.2));
+
   const confidence = clamp(
-    talkScore * 0.5 + (m.longestSilence < 25 ? 95 : 60) * 0.3 + (m.candidateTurns >= 4 ? 90 : 60) * 0.2,
+    talkScore * 0.5 +
+    (m.longestSilence < 25 ? 95 : 60) * 0.3 +
+    (m.candidateTurns >= 4 ? 90 : 60) * 0.2 -
+    fluencyPenalty,
   );
+
+  const starHits = Object.values(m.star).filter(Boolean).length;
 
   const scores: ReportScore[] = [
     { label: "Coding", value: coding, note: m.testsTotal ? `${m.testsPassed}/${m.testsTotal} tests passed` : "Not a coding round" },
     { label: "Communication", value: communication, note: `Spoke for ~${Math.round(talkRatio * 100)}% of the session` },
     { label: "Problem Solving", value: problemSolving, note: m.hintsUsed ? `${m.hintsUsed} hint(s) used` : "No hints used" },
     { label: "Optimization", value: optimization, note: m.mentionedComplexity ? "Raised complexity unprompted" : "Complexity never discussed" },
+    {
+      label: "Fluency",
+      value: clamp(100 - fluencyPenalty * 3.3),
+      note: m.wordCount < 25
+        ? "Too few words to judge"
+        : `${m.fillerCount} filler word${m.fillerCount === 1 ? "" : "s"} in ${m.wordCount} (${fillerPct.toFixed(1)}%)`,
+    },
     { label: "Confidence", value: confidence, note: `Longest silence ${Math.round(m.longestSilence)}s` },
   ];
 
+  if (mode === "behavioral" || mode === "resume") {
+    scores.push({
+      label: "STAR Structure",
+      value: clamp((starHits / 4) * 100),
+      note: starHits === 4
+        ? "Situation, Task, Action and Result all covered"
+        : `Missing: ${Object.entries(m.star).filter(([, v]) => !v).map(([k]) => k).join(", ")}`,
+    });
+  }
+
   const overall = clamp(
-    coding * 0.3 + communication * 0.25 + problemSolving * 0.25 + optimization * 0.1 + confidence * 0.1,
+    coding * 0.28 + communication * 0.24 + problemSolving * 0.22 +
+    optimization * 0.1 + confidence * 0.1 - fluencyPenalty * 0.2 +
+    (mode === "dsa" ? 0 : (starHits / 4) * 6),
   );
 
   const strengths: string[] = [];
@@ -267,6 +333,25 @@ export function buildReport(m: SessionMetrics, mode: InterviewMode): InterviewRe
   }
   if (m.hintsUsed > 1) recommendations.push("Practice the pattern behind this problem so you need fewer hints.");
   if (m.longestSilence > 45) recommendations.push("Break long silences with 'let me think about X for a second'.");
+
+  if (fillerPct > 6 && m.wordCount >= 25) {
+    recommendations.push(
+      `Filler words were ${fillerPct.toFixed(0)}% of what you said. Replace "um" and "like" with a short pause — silence reads as composure.`,
+    );
+  } else if (m.wordCount >= 40 && fillerPct < 2) {
+    strengths.push("Clean delivery with almost no filler words.");
+  }
+
+  if (mode !== "dsa") {
+    if (starHits === 4) strengths.push("Answers followed the full STAR structure.");
+    else {
+      const missing = Object.entries(m.star).filter(([, v]) => !v).map(([k]) => k);
+      recommendations.push(
+        `Your answers skipped the ${missing.join(" and ")} part of STAR — the Result is what interviewers actually score.`,
+      );
+    }
+  }
+
   if (strengths.length === 0) strengths.push("Completed the session end to end.");
 
   const verdict =

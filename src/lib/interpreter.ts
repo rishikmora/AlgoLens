@@ -34,6 +34,7 @@ interface Token {
 const KEYWORDS = new Set([
   "let", "const", "var", "if", "else", "while", "for",
   "function", "return", "true", "false", "null", "break", "continue",
+  "new",
 ]);
 
 const TWO_CHAR_OPS = ["==", "!=", "<=", ">=", "&&", "||", "++", "--", "+=", "-=", "*=", "/="];
@@ -241,9 +242,25 @@ export class Parser {
   private forStmt(): Node {
     const t = this.advance();
     this.expect("PUNCT", "(");
+
+    // `for (const x of iterable)` — detected by lookahead past the binding name.
+    const nt = this.peek();
+    if (nt.type === "KW" && ["let", "var", "const"].includes(nt.value)) {
+      const after = this.peek(1);
+      const ofTok = this.peek(2);
+      if (after?.type === "IDENT" && ofTok?.type === "IDENT" && ofTok.value === "of") {
+        this.advance();                       // let / const / var
+        const name = this.advance().value;    // binding
+        this.advance();                       // of
+        const iterable = this.expression();
+        this.expect("PUNCT", ")");
+        const body = this.statement();
+        return { type: "ForOf", name, iterable, body, line: t.line };
+      }
+    }
+
     let init: Node | null = null;
     if (!this.check("PUNCT", ";")) {
-      const nt = this.peek();
       init = nt.type === "KW" && ["let", "var", "const"].includes(nt.value)
         ? this.varDecl()
         : this.exprStmt();
@@ -313,6 +330,20 @@ export class Parser {
       const argument = this.unary();
       return { type: "Unary", op, argument, line: argument.line };
     }
+    if (this.check("KW", "new")) {
+      const t = this.advance();
+      const ctor = this.expect("IDENT", undefined, "Expected a constructor name").value;
+      const args: Node[] = [];
+      if (this.match("PUNCT", "(")) {
+        if (!this.check("PUNCT", ")")) {
+          args.push(this.expression());
+          while (this.match("PUNCT", ",")) args.push(this.expression());
+        }
+        this.expect("PUNCT", ")");
+      }
+      // Allow chaining off the instance, e.g. new Map().set(k, v)
+      return this.callTail({ type: "New", ctor, args, line: t.line });
+    }
     return this.postfix();
   }
 
@@ -326,7 +357,12 @@ export class Parser {
   }
 
   private call(): Node {
-    let e = this.primary();
+    return this.callTail(this.primary());
+  }
+
+  /** Applies any trailing (), [] or . accessors to an already-parsed expression. */
+  private callTail(start: Node): Node {
+    let e = start;
     for (;;) {
       if (this.match("PUNCT", "(")) {
         const args: Node[] = [];
@@ -368,6 +404,23 @@ export class Parser {
       }
       this.expect("PUNCT", "]");
       return { type: "Array", elements, line: t.line };
+    }
+    // Object literal. Statements check for '{' before reaching here, so a brace
+    // in expression position is unambiguous.
+    if (this.match("PUNCT", "{")) {
+      const props: { key: string; value: Node }[] = [];
+      while (!this.check("PUNCT", "}") && !this.check("EOF")) {
+        const k = this.peek();
+        if (k.type !== "IDENT" && k.type !== "STR" && k.type !== "NUM" && k.type !== "KW") {
+          throw new SyntaxError(`Expected a property name at line ${k.line}, got '${k.value}'`);
+        }
+        this.advance();
+        this.expect("PUNCT", ":");
+        props.push({ key: String(k.value), value: this.expression() });
+        if (!this.match("PUNCT", ",")) break;
+      }
+      this.expect("PUNCT", "}");
+      return { type: "Object", props, line: t.line };
     }
     throw new SyntaxError(`Unexpected token ${t.type} '${t.value}' at line ${t.line}`);
   }
@@ -467,6 +520,8 @@ export class Interpreter {
   private heap = new Map<number, Val>();
   private heapNext = 1;
   private stack: RunFrame[] = [];
+  /** Innermost environment currently executing — drives the watch panel. */
+  private currentEnv: Environment | null = null;
   private ops = 0;
   private comparisons = 0;
   private writes = 0;
@@ -544,8 +599,21 @@ export class Interpreter {
     return { steps: this.steps, output: this.output, error };
   }
 
+  /**
+   * The innermost frame is snapshotted across its whole scope chain, so
+   * block-scoped variables (`const seen` inside a function body, a loop's
+   * `let i`) are visible in the watch panel instead of being hidden in a
+   * child environment.
+   */
   private stackSnap(): Frame[] {
-    return this.stack.map((f) => ({ name: f.name, line: f.line, vars: varsSnap(f.env) }));
+    return this.stack.map((f, i) => ({
+      name: f.name,
+      line: f.line,
+      vars:
+        i === this.stack.length - 1 && this.currentEnv
+          ? varsChain(this.currentEnv, f.env)
+          : varsSnap(f.env),
+    }));
   }
 
   private heapSnap(): Record<number, Val> {
@@ -556,6 +624,7 @@ export class Interpreter {
 
   private exec(node: Node | null, env: Environment): void {
     if (!node) return;
+    this.currentEnv = env;
     const top = this.stack[this.stack.length - 1];
     if (top && node.line) top.line = node.line;
 
@@ -635,6 +704,33 @@ export class Interpreter {
         return;
       }
 
+      case "ForOf": {
+        const iterable = this.evaluate(node.iterable, env);
+        const items: Val[] =
+          typeof iterable === "string" ? [...iterable]
+          : Array.isArray(iterable) ? iterable
+          : iterable instanceof Set ? [...iterable]
+          : iterable instanceof Map ? [...iterable]
+          : [];
+        let n = 0;
+        for (const item of items) {
+          const inner = new Environment(env, env.name);
+          inner.define(node.name, item);
+          this.emit({
+            t: "loop-iter", kind: "for-of", iter: n++, line: node.line,
+            msg: `for…of → ${node.name} = ${fmt(item)}`,
+            vars: varsSnap(inner), stack: this.stackSnap(),
+          });
+          try {
+            this.exec(node.body, inner);
+          } catch (e) {
+            if (e instanceof BreakSignal) break;
+            if (!(e instanceof ContinueSignal)) throw e;
+          }
+        }
+        return;
+      }
+
       case "Return": {
         const v = node.argument ? this.evaluate(node.argument, env) : undefined;
         this.emit({
@@ -652,6 +748,7 @@ export class Interpreter {
 
   private evaluate(node: Node | null, env: Environment): Val {
     if (!node) return undefined;
+    this.currentEnv = env;
     const top = this.stack[this.stack.length - 1];
     if (top && node.line) top.line = node.line;
 
@@ -667,6 +764,40 @@ export class Interpreter {
           msg: `Allocate array #${ref}, size ${arr.length}`, heap: this.heapSnap(),
         });
         return arr;
+      }
+
+      case "Object": {
+        const obj: Record<string, Val> = {};
+        for (const p of node.props as { key: string; value: Node }[]) {
+          obj[p.key] = this.evaluate(p.value, env);
+        }
+        this.emit({
+          t: "heap-alloc", line: node.line,
+          msg: `Allocate object {${Object.keys(obj).join(", ")}}`,
+          value: { ...obj }, stack: this.stackSnap(),
+        });
+        return obj;
+      }
+
+      case "New": {
+        const args = (node.args as Node[]).map((a) => this.evaluate(a, env));
+        let instance: Val;
+        switch (node.ctor) {
+          case "Map": instance = new Map(args[0] ?? []); break;
+          case "Set": instance = new Set(args[0] ?? []); break;
+          case "Array":
+            instance = args.length === 1 && typeof args[0] === "number"
+              ? new Array(args[0]).fill(undefined)
+              : [...args];
+            break;
+          default:
+            throw new Error(`'new ${node.ctor}' is not supported by the step debugger (try Map, Set or Array)`);
+        }
+        this.emit({
+          t: "heap-alloc", line: node.line,
+          msg: `new ${node.ctor}()`, value: fmt(instance), stack: this.stackSnap(),
+        });
+        return instance;
       }
 
       case "Ident": return env.get(node.name);
@@ -728,13 +859,37 @@ export class Interpreter {
         if (node.target.type === "Index") {
           const obj = this.evaluate(node.target.object, env);
           const idx = this.evaluate(node.target.index, env);
-          obj[idx] = v;
+          let cur = v;
+          if (node.op !== "=") {
+            const old = obj?.[idx];
+            cur = node.op === "+=" ? old + v : node.op === "-=" ? old - v
+              : node.op === "*=" ? old * v : old / v;
+          }
+          if (obj instanceof Map) obj.set(idx, cur);
+          else obj[idx] = cur;
           this.writes++;
           this.emit({
-            t: "array-write", idx, value: v, line: node.line,
-            msg: `arr[${idx}] = ${fmt(v)}`, stack: this.stackSnap(), heap: this.heapSnap(),
+            t: "array-write", idx, value: cur, line: node.line,
+            msg: `[${fmt(idx)}] = ${fmt(cur)}`, stack: this.stackSnap(), heap: this.heapSnap(),
           });
-          return v;
+          return cur;
+        }
+        if (node.target.type === "Member") {
+          const obj = this.evaluate(node.target.object, env);
+          const prop = node.target.property;
+          let cur = v;
+          if (node.op !== "=") {
+            const old = obj?.[prop];
+            cur = node.op === "+=" ? old + v : node.op === "-=" ? old - v
+              : node.op === "*=" ? old * v : old / v;
+          }
+          if (obj && typeof obj === "object") obj[prop] = cur;
+          this.writes++;
+          this.emit({
+            t: "assign", name: prop, value: cur, line: node.line,
+            msg: `.${prop} = ${fmt(cur)}`, stack: this.stackSnap(),
+          });
+          return cur;
         }
         return v;
       }
@@ -764,10 +919,35 @@ export class Interpreter {
       case "Member": {
         const obj = this.evaluate(node.object, env);
         if (node.property === "length") return obj?.length;
+        if (node.property === "size" && (obj instanceof Map || obj instanceof Set)) return obj.size;
         return obj?.[node.property];
       }
 
       case "Call": {
+        // Method calls must keep their receiver, so `map.set(...)` works.
+        if (node.callee.type === "Member") {
+          const recv = this.evaluate(node.callee.object, env);
+          const name = node.callee.property as string;
+          const args = (node.args as Node[]).map((a) => this.evaluate(a, env));
+          const method = recv?.[name];
+          if (typeof method !== "function") {
+            throw new TypeError(`'${name}' is not a method on ${fmt(recv)}`);
+          }
+          const before = recv instanceof Map || recv instanceof Set ? recv.size : recv?.length;
+          const result = method.apply(recv, args);
+          const after = recv instanceof Map || recv instanceof Set ? recv.size : recv?.length;
+          if (before !== after) this.writes++;
+          this.emit({
+            t: before !== after ? "array-write" : "binop",
+            line: node.line,
+            value: result,
+            msg: `.${name}(${args.map((a) => fmt(a)).join(", ")}) → ${fmt(result)}`,
+            stack: this.stackSnap(),
+            heap: this.heapSnap(),
+          });
+          return result;
+        }
+
         const callee = this.evaluate(node.callee, env);
         const args = (node.args as Node[]).map((a) => this.evaluate(a, env));
 
@@ -793,6 +973,7 @@ export class Interpreter {
           }
 
           this.stack.pop();
+          this.currentEnv = env; // back to the caller's scope
           this.emit({
             t: "exit-frame", name: callee.name, returnValue: result, line: node.line,
             stack: this.stackSnap(), msg: `Return from ${callee.name} → ${fmt(result)}`,
@@ -815,9 +996,45 @@ export function fmt(v: Val): string {
   if (Array.isArray(v)) {
     return `[${v.slice(0, 6).map((x) => fmt(x)).join(", ")}${v.length > 6 ? ", …" : ""}]`;
   }
-  if (typeof v === "object" && v.__fn) return `<fn ${v.name}>`;
+  if (v instanceof Map) {
+    const entries = [...v.entries()].slice(0, 5).map(([k, val]) => `${fmt(k)} → ${fmt(val)}`);
+    return `Map(${v.size}) {${entries.join(", ")}${v.size > 5 ? ", …" : ""}}`;
+  }
+  if (v instanceof Set) {
+    const items = [...v].slice(0, 6).map((x) => fmt(x));
+    return `Set(${v.size}) {${items.join(", ")}${v.size > 6 ? ", …" : ""}}`;
+  }
   if (typeof v === "function") return "<builtin>";
+  if (typeof v === "object") {
+    if (v.__fn) return `<fn ${v.name}>`;
+    const keys = Object.keys(v);
+    const shown = keys.slice(0, 4).map((k) => `${k}: ${fmt(v[k])}`);
+    return `{${shown.join(", ")}${keys.length > 4 ? ", …" : ""}}`;
+  }
   return String(v);
+}
+
+/** Deep-ish copy so a later mutation can't rewrite an earlier recorded step. */
+function snapValue(v: Val): Val {
+  if (Array.isArray(v)) return [...v];
+  if (v instanceof Map) return new Map(v);
+  if (v instanceof Set) return new Set(v);
+  if (v && typeof v === "object" && !v.__fn) return { ...v };
+  return v;
+}
+
+/** Merges every scope from `from` up to `until`, inner shadowing outer. */
+function varsChain(from: Environment, until: Environment): Record<string, Val> {
+  const chain: Environment[] = [];
+  let e: Environment | null = from;
+  while (e) {
+    chain.push(e);
+    if (e === until) break;
+    e = e.parent;
+  }
+  const out: Record<string, Val> = {};
+  for (const env of chain.reverse()) Object.assign(out, varsSnap(env));
+  return out;
 }
 
 function varsSnap(env: Environment): Record<string, Val> {
@@ -826,10 +1043,19 @@ function varsSnap(env: Environment): Record<string, Val> {
     const v = env.vars[k];
     if (typeof v === "function") continue; // hide builtins from the watch panel
     if (v && typeof v === "object" && v.__fn) r[k] = { _fn: v.name };
-    else if (Array.isArray(v)) r[k] = [...v];
-    else r[k] = v;
+    else r[k] = snapValue(v);
   }
   return r;
+}
+
+/**
+ * A solution file is only a function declaration, so running it as a program
+ * executes nothing. Appending a call with real arguments is what makes the
+ * step debugger show anything at all.
+ */
+export function buildEntrySource(code: string, fn: string, args: unknown[]): string {
+  const literals = args.map((a) => JSON.stringify(a)).join(", ");
+  return `${code.trimEnd()}\n\n${fn}(${literals});\n`;
 }
 
 /** Lex → parse → run, capturing every step. Never throws: errors land in `error`. */

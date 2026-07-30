@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Play, Pause, SkipBack, SkipForward, RotateCcw, Bug, TriangleAlert } from "lucide-react";
-import { compileAndRun, fmt, type Step } from "@/lib/interpreter";
+import { compileAndRun, buildEntrySource, fmt, type Step } from "@/lib/interpreter";
 import { Badge, Button, Empty } from "./ui";
 import { cn } from "@/lib/utils";
 
@@ -26,14 +26,42 @@ const STEP_TONE: Record<string, string> = {
  * Unlike print debugging, every variable write and stack frame is recorded,
  * so you can scrub backwards through execution.
  */
-export default function DebugPanel({ code }: { code: string }) {
-  const [armed, setArmed] = useState(false);
+export interface DebugEntry {
+  fn: string;
+  args: unknown[];
+  label?: string;
+}
+
+export default function DebugPanel({
+  code,
+  entry,
+  autoStart = false,
+}: {
+  code: string;
+  /** Appends a call so a bare function declaration actually executes. */
+  entry?: DebugEntry;
+  autoStart?: boolean;
+}) {
+  const [armed, setArmed] = useState(autoStart);
   const [i, setI] = useState(0);
   const [playing, setPlaying] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const result = useMemo(() => (armed ? compileAndRun(code) : null), [armed, code]);
+  useEffect(() => { setArmed(autoStart); }, [autoStart, entry?.fn, code]);
+
+  const source = useMemo(
+    () => (entry ? buildEntrySource(code, entry.fn, entry.args) : code),
+    [code, entry],
+  );
+
+  const result = useMemo(() => (armed ? compileAndRun(source) : null), [armed, source]);
   const steps: Step[] = result?.steps ?? [];
+
+  const returned = useMemo(() => {
+    if (!entry) return undefined;
+    const exit = [...steps].reverse().find((s) => s.t === "exit-frame" && s.name === entry.fn);
+    return exit ? fmt(exit.returnValue) : undefined;
+  }, [steps, entry]);
 
   useEffect(() => { setI(0); setPlaying(false); }, [result]);
 
@@ -50,7 +78,7 @@ export default function DebugPanel({ code }: { code: string }) {
   }, [steps.length]);
 
   const s = steps[Math.min(i, Math.max(0, steps.length - 1))];
-  const lines = code.split("\n");
+  const lines = source.split("\n");
   const topFrame = s?.stack?.[s.stack.length - 1];
   const heapEntries = Object.entries(s?.heap ?? {});
 
@@ -66,9 +94,11 @@ export default function DebugPanel({ code }: { code: string }) {
               highlighting, live variables, the call stack and the heap — and you can step{" "}
               <em>backwards</em>, which no <code className="rounded-xs bg-bg3 px-1 font-mono text-[11.5px]">print()</code> can do.
             </p>
-            <p className="mt-2 text-[11.5px] text-ink3">
-              Supports a JavaScript subset: let/const, if/else, while, for, functions, recursion,
-              arrays, and the builtins print, len, push, pop, max, min, abs, floor, ceil, sqrt.
+            <p className="mt-2 text-2xs leading-relaxed text-faint">
+              Supports a JavaScript subset: let/const/var, if/else, while, for, for…of, functions,
+              recursion, arrays, objects, <code className="font-mono">Map</code>,{" "}
+              <code className="font-mono">Set</code>, and the builtins print, len, push, pop, max,
+              min, abs, floor, ceil, sqrt.
             </p>
           </div>
         </div>
@@ -112,15 +142,31 @@ export default function DebugPanel({ code }: { code: string }) {
         <Button size="sm" onClick={() => step(1)} title="Step forward">
           <SkipForward className="h-3.5 w-3.5" />
         </Button>
-        <span className="ml-1 font-mono text-[11px] text-ink3">
+        <span className="ml-1 font-mono text-2xs tabular-nums text-faint">
           step {i + 1}/{steps.length}
         </span>
         <Badge tone={(STEP_TONE[s.t] ?? "neutral") as never}>{s.t}</Badge>
-        <span className="truncate text-[12px] text-ink1">{s.msg}</span>
+        <span className="truncate text-xs text-secondary">{s.msg}</span>
         <Button size="sm" variant="ghost" className="ml-auto" onClick={() => setArmed(false)}>
           Reset
         </Button>
       </div>
+
+      {entry && (
+        <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline bg-sunken/60 px-2.5 py-1.5 font-mono text-2xs">
+          <span className="text-faint">replaying</span>
+          <span className="text-primary">
+            {entry.fn}({entry.args.map((a) => JSON.stringify(a)).join(", ")})
+          </span>
+          {returned !== undefined && (
+            <>
+              <span className="text-faint">→</span>
+              <span className="text-signal">{returned}</span>
+            </>
+          )}
+          {entry.label && <span className="ml-auto text-faint">{entry.label}</span>}
+        </div>
+      )}
 
       <input
         type="range"

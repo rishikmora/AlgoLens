@@ -100,6 +100,17 @@ export const PACKS: InterviewPack[] = [
     rounds: ["Introduction", "Machine coding", "Extend the requirement", "DSA", "Behavioral"],
   },
   {
+    id: "rubrik",
+    name: "Rubrik",
+    accent: "#4dd9c0",
+    questionCount: 65,
+    focus: ["Systems", "Concurrency", "Data Structures", "Debugging"],
+    persona:
+      "A Rubrik Senior Engineer from the infrastructure side. Interested in how your code behaves under failure and concurrency, not just whether it returns the right answer. Will ask what happens when a node dies mid-operation, and expects you to reason about state consistency rather than hand-wave.",
+    signals: ["Systems thinking", "Failure reasoning", "Data structure depth", "Debugging rigour"],
+    rounds: ["Introduction", "DSA", "Failure-mode follow-up", "Concurrency question", "Behavioral"],
+  },
+  {
     id: "goldman-sachs",
     name: "Goldman Sachs",
     accent: "#4dd9c0",

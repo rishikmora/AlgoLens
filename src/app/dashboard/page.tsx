@@ -170,18 +170,40 @@ export default function DashboardPage() {
             >
               Weak topics
             </SectionTitle>
-            <Card className="space-y-2.5 p-4">
+            <Card className="p-4">
               {weakTopics.length === 0 ? (
                 <Empty>No weak spots — every topic is above 60%.</Empty>
               ) : (
-                weakTopics.map((t) => (
-                  <ScoreBar
-                    key={t.topic}
-                    label={t.topic}
-                    value={Math.round(t.pct)}
-                    note={`${t.done}/${t.total} solved`}
-                  />
-                ))
+                <div className="space-y-4">
+                  {weakTopics.map((t) => {
+                    const todo = PROBLEMS.filter(
+                      (p) => p.topics.includes(t.topic) && !solvedSlugs.has(p.slug),
+                    ).slice(0, 4);
+                    return (
+                      <div key={t.topic}>
+                        <ScoreBar
+                          label={t.topic}
+                          value={Math.round(t.pct)}
+                          note={`${t.done}/${t.total} solved`}
+                        />
+                        {todo.length > 0 && (
+                          <div className="mt-2 flex flex-wrap items-center gap-1.5 pl-0.5">
+                            <span className="text-2xs text-faint">Practice:</span>
+                            {todo.map((p) => (
+                              <Link
+                                key={p.slug}
+                                href={`/problems/${p.slug}`}
+                                className="rounded-xs border border-edge bg-elevated px-1.5 py-0.5 text-2xs text-secondary transition-colors hover:border-signal/40 hover:text-signal"
+                              >
+                                {p.title}
+                              </Link>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </Card>
           </section>

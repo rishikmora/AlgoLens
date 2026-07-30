@@ -196,7 +196,10 @@ The user is currently on hint level ${body.hintLevel ?? 1}.`
           "You are reading a hand-drawn sketch on a DSA whiteboard. Identify the structure (tree, " +
           "graph, linked list, DP table, recursion tree, array) and answer the student's question " +
           "about it. If the drawing is ambiguous or empty, say so plainly instead of guessing. " +
-          "Be concise and use markdown.",
+          "Be concise and use markdown.\n\n" +
+          "Always finish with a line starting exactly `**Your turn:** ` followed by one probing " +
+          "question about their drawing — why a traversal works, what the invariant is, what breaks " +
+          "if an edge is added. Never answer that question yourself.",
         messages: [{
           role: "user",
           content: [

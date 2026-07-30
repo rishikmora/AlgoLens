@@ -83,11 +83,14 @@ const LIGHT = {
   },
 };
 
+export type EditorInstance = Parameters<OnMount>[0];
+
 export default function CodeEditor({
   value,
   lang,
   onChange,
   onRun,
+  onReady,
   readOnly = false,
   height = "100%",
 }: {
@@ -95,6 +98,8 @@ export default function CodeEditor({
   lang: Lang;
   onChange?: (v: string) => void;
   onRun?: () => void;
+  /** Hands the editor instance out so callers can reveal a line. */
+  onReady?: (editor: EditorInstance) => void;
   readOnly?: boolean;
   height?: string;
 }) {
@@ -105,6 +110,7 @@ export default function CodeEditor({
 
   const handleMount: OnMount = (editor, monaco) => {
     monacoRef.current = monaco;
+    onReady?.(editor);
     monaco.editor.defineTheme("rishalgo-dark", DARK);
     monaco.editor.defineTheme("rishalgo-light", LIGHT);
     monaco.editor.setTheme(theme === "light" ? "rishalgo-light" : "rishalgo-dark");

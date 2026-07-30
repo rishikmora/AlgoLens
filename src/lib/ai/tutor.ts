@@ -90,7 +90,7 @@ export function localTutor(question: string, ctx: TutorContext): string {
   // ── Mistake analysis ─────────────────────────────────────────────
   if (/mistake|wrong|bug|failing|why.*fail|what'?s wrong/.test(q)) {
     if (!ctx.code?.trim()) return "Write some code first and I'll review it against the common failure modes for this problem.";
-    const r = reviewCode(ctx.code, { passed: 0, total: 0, verdict: "Unknown" });
+    const r = reviewCode(ctx.code, { passed: 0, total: 0, verdict: "Unknown" }, p);
     const items = r.suggestions.slice(0, 4).map((s) => `- ${s}`).join("\n");
     return (
       `**What I can see in your code**\n\n${items}\n\n` +

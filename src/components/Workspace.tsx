@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Play, Send, CircleCheck, CircleX, Clock, Cpu, Lightbulb,
-  Sparkles, Activity, Bug, TriangleAlert, ChevronRight,
+  Sparkles, Bug, TriangleAlert, ChevronRight, UserRoundSearch,
 } from "lucide-react";
 import { LANGS, type Lang, type Problem } from "@/data/problems";
 import { judge, verdictColor, EXECUTABLE_LANGS, type RunOutcome } from "@/lib/judge";
@@ -12,11 +12,23 @@ import { algoById } from "@/lib/algos";
 import { DEFAULT_ARRAY } from "@/lib/algos";
 import { useProgress } from "@/lib/store";
 import { useWorkspace } from "@/lib/workspace";
-import CodeEditor from "./CodeEditor";
+import { analyzePair, type PairNote } from "@/lib/ai/pair";
+import CodeEditor, { type EditorInstance } from "./CodeEditor";
 import DebugPanel from "./DebugPanel";
 import { VizPlayer } from "./Visualizer";
 import { Badge, Button, Tabs, ScoreBar, Empty, Markdown } from "./ui";
 import { cn, difficultyColor } from "@/lib/utils";
+
+/** Renders the `backtick` spans in pair-programmer notes as inline code. */
+function inlineCode(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(
+      /`(.+?)`/g,
+      '<code class="rounded-xs bg-elevated px-1 font-mono text-[0.95em] text-primary">$1</code>',
+    );
+}
 
 const LEFT_TABS = [
   { id: "description", label: "Description" },
@@ -39,6 +51,8 @@ export default function Workspace({ problem }: { problem: Problem }) {
   const [customInput, setCustomInput] = useState(JSON.stringify(problem.tests[0].args));
   const [customResult, setCustomResult] = useState<string | null>(null);
   const [splitPct, setSplitPct] = useState(42);
+  const [pairNotes, setPairNotes] = useState<PairNote[]>([]);
+  const editorRef = useRef<EditorInstance | null>(null);
 
   const { recordSubmission, saveDraft, drafts } = useProgress();
   const setWs = useWorkspace((s) => s.set);
@@ -70,6 +84,13 @@ export default function Workspace({ problem }: { problem: Problem }) {
     return () => clearTimeout(t);
   }, [code, draftKey, saveDraft]);
 
+  // Debounced so it reacts to a finished thought, not every keystroke.
+  useEffect(() => {
+    if (lang !== "javascript") { setPairNotes([]); return; }
+    const t = setTimeout(() => setPairNotes(analyzePair(code, problem)), 900);
+    return () => clearTimeout(t);
+  }, [code, lang, problem]);
+
   const run = useCallback(async (submit: boolean) => {
     setRunning(true);
     setBottomTab("tests");
@@ -79,7 +100,7 @@ export default function Workspace({ problem }: { problem: Problem }) {
     setRunning(false);
 
     if (submit) {
-      const r = reviewCode(code, { passed: res.passed, total: res.total, verdict: res.verdict });
+      const r = reviewCode(code, { passed: res.passed, total: res.total, verdict: res.verdict }, problem);
       setReview(r);
       recordSubmission({
         slug: problem.slug,
@@ -92,7 +113,9 @@ export default function Workspace({ problem }: { problem: Problem }) {
         runtimeMs: Math.round(res.runtimeMs),
         at: Date.now(),
       });
-      if (res.verdict === "Accepted" && problem.viz) setBottomTab("viz");
+      // An accepted solution should show itself executing, not just say "Accepted".
+      if (res.verdict === "Accepted" && lang === "javascript") setBottomTab("replay");
+      else if (res.verdict === "Accepted" && problem.viz) setBottomTab("viz");
       else if (res.verdict === "Accepted") setBottomTab("review");
     }
   }, [code, lang, problem, recordSubmission]);
@@ -142,10 +165,29 @@ export default function Workspace({ problem }: { problem: Problem }) {
       ) : undefined },
     { id: "console", label: "Console" },
     { id: "custom", label: "Custom Input" },
+    {
+      id: "replay",
+      label: "Replay",
+      badge: outcome?.verdict === "Accepted"
+        ? <span className="size-1.5 rounded-full bg-signal" />
+        : undefined,
+    },
     { id: "review", label: "AI Review" },
     ...(viz ? [{ id: "viz", label: "Visualization" }] : []),
     { id: "debug", label: "Debug" },
   ];
+
+  // Replay the case the user is most likely to care about: the first failure,
+  // or case 1 when everything passed.
+  const replayCase =
+    outcome?.results.find((r) => !r.passed)?.idx ?? 0;
+  const replayEntry = {
+    fn: problem.fn,
+    args: (outcome?.results[replayCase]?.args ?? problem.tests[0].args) as unknown[],
+    label: outcome
+      ? `test case ${replayCase + 1}${outcome.results[replayCase]?.passed === false ? " (failing)" : ""}`
+      : "test case 1",
+  };
 
   return (
     <div className="flex h-[calc(100vh-3rem)] min-h-0 flex-col">
@@ -255,7 +297,7 @@ export default function Workspace({ problem }: { problem: Problem }) {
                 </pre>
                 {viz && (
                   <Button size="sm" onClick={() => setBottomTab("viz")}>
-                    <Activity className="h-3.5 w-3.5" /> Watch it run
+                    <Play /> Watch it run
                   </Button>
                 )}
               </div>
@@ -323,8 +365,52 @@ export default function Workspace({ problem }: { problem: Problem }) {
           </div>
 
           <div className="min-h-0 flex-[1.35]">
-            <CodeEditor value={code} lang={lang} onChange={setCode} onRun={() => run(false)} />
+            <CodeEditor
+              value={code}
+              lang={lang}
+              onChange={setCode}
+              onRun={() => run(false)}
+              onReady={(ed) => { editorRef.current = ed; }}
+            />
           </div>
+
+          {/* Pair programmer — watches the code, points at a line */}
+          {pairNotes.length > 0 && (
+            <div className="shrink-0 border-t border-hairline bg-sunken/50">
+              <div className="flex items-center gap-1.5 px-2.5 pt-1.5">
+                <UserRoundSearch className="size-3 text-ai" />
+                <span className="eyebrow text-ai">Pair programmer</span>
+              </div>
+              <div className="flex flex-col gap-px px-2.5 pb-2 pt-1">
+                {pairNotes.map((n) => (
+                  <button
+                    key={n.id}
+                    onClick={() => {
+                      editorRef.current?.revealLineInCenter(n.line);
+                      editorRef.current?.setPosition({ lineNumber: n.line, column: 1 });
+                      editorRef.current?.focus();
+                    }}
+                    className="group flex items-start gap-2 rounded-xs px-1 py-1 text-left transition-colors hover:bg-elevated"
+                  >
+                    <span
+                      className={cn(
+                        "mt-px shrink-0 rounded-xs border px-1 py-px font-mono text-2xs leading-tight",
+                        n.severity === "bug" ? "border-danger/35 bg-danger/10 text-danger"
+                          : n.severity === "warn" ? "border-warn/35 bg-warn/10 text-warn"
+                          : "border-ai/35 bg-ai/10 text-ai",
+                      )}
+                    >
+                      L{n.line}
+                    </span>
+                    <span
+                      className="text-xs leading-snug text-secondary group-hover:text-primary"
+                      dangerouslySetInnerHTML={{ __html: inlineCode(n.message) }}
+                    />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="flex min-h-0 flex-1 flex-col border-t border-line">
             <Tabs tabs={bottomTabs} active={bottomTab} onChange={setBottomTab} className="shrink-0 px-2" />
@@ -370,6 +456,23 @@ export default function Workspace({ problem }: { problem: Problem }) {
                     </pre>
                   )}
                 </div>
+              )}
+
+              {bottomTab === "replay" && (
+                lang === "javascript" ? (
+                  <DebugPanel
+                    code={code}
+                    entry={replayEntry}
+                    autoStart={outcome?.verdict === "Accepted"}
+                  />
+                ) : (
+                  <div className="p-3.5">
+                    <Empty>
+                      Replay steps through a JavaScript-subset interpreter. Switch the language to
+                      JavaScript to watch your own solution execute line by line.
+                    </Empty>
+                  </div>
+                )
               )}
 
               {bottomTab === "review" && (
@@ -586,6 +689,16 @@ function ReviewPanel({ review }: { review: CodeReview | null }) {
             ))}
           </ul>
         </div>
+
+        {review.alternative && (
+          <div className="rounded-md border border-ai/25 bg-ai/[0.06] p-3">
+            <h4 className="eyebrow mb-1.5 flex items-center gap-1.5 text-ai">
+              <Sparkles className="size-3" /> Alternative approach
+            </h4>
+            <div className="text-sm font-medium text-primary">{review.alternative.title}</div>
+            <p className="mt-1 text-xs leading-relaxed text-secondary">{review.alternative.body}</p>
+          </div>
+        )}
       </div>
     </div>
   );

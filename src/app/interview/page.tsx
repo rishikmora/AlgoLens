@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Mic, MicOff, FileText, Code2, MessageSquare, ArrowRight, Volume2 } from "lucide-react";
+import {
+  Mic, MicOff, FileText, Code2, MessageSquare, ArrowRight, Volume2, Upload, TriangleAlert,
+} from "lucide-react";
 import { PACKS } from "@/data/companies";
 import { PROBLEMS } from "@/data/problems";
 import { useInterviewSetup, extractProjects } from "@/lib/interviewSetup";
@@ -20,6 +22,7 @@ export default function InterviewSetupPage() {
   const { packId, mode, problemSlug, voice, resumeText, set } = useInterviewSetup();
   const { name, interviews } = useProgress();
   const [mounted, setMounted] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -134,18 +137,57 @@ export default function InterviewSetupPage() {
         )}
 
         {mode === "resume" && (
-          <div className="mt-3">
+          <div className="mt-3 space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="inline-flex">
+                <input
+                  type="file"
+                  accept=".txt,.md,.markdown,.json,.csv"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    setUploadError(null);
+                    if (/\.pdf$/i.test(file.name)) {
+                      setUploadError("PDF text extraction needs the backend parser. Open the PDF, copy the text, and paste it below.");
+                      return;
+                    }
+                    if (file.size > 400_000) {
+                      setUploadError("That file is larger than 400 KB — paste the relevant sections instead.");
+                      return;
+                    }
+                    set({ resumeText: await file.text() });
+                  }}
+                />
+                <span className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-sm border border-edge bg-elevated px-3 text-sm font-medium text-primary transition-colors hover:border-edge-strong hover:bg-hover">
+                  <Upload className="size-3.5" /> Upload resume
+                </span>
+              </label>
+              <span className="text-2xs text-faint">.txt / .md — or paste below</span>
+              {resumeText && (
+                <Button size="sm" variant="ghost" onClick={() => set({ resumeText: "" })}>
+                  Clear
+                </Button>
+              )}
+            </div>
+
+            {uploadError && (
+              <p className="flex items-start gap-1.5 rounded-sm border border-warn/30 bg-warn/10 p-2 text-xs text-warn">
+                <TriangleAlert className="mt-px size-3.5 shrink-0" /> {uploadError}
+              </p>
+            )}
+
             <textarea
               value={resumeText}
               onChange={(e) => set({ resumeText: e.target.value })}
               rows={6}
               placeholder="Paste your resume text here — the interviewer will ask about the projects it finds."
-              className="w-full rounded-md border border-line bg-bg0 p-2.5 text-[12.5px] text-ink0 outline-none focus:border-bg4"
+              className="w-full rounded-md border border-edge bg-sunken p-3 text-xs leading-relaxed text-primary outline-none focus:border-edge-strong"
             />
             {projects.length > 0 && (
-              <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                <span className="text-[11.5px] text-ink3">Detected projects:</span>
-                {projects.map((p) => <Badge key={p} tone="teal">{p}</Badge>)}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-2xs text-faint">Detected projects:</span>
+                {projects.map((p) => <Badge key={p} tone="mint">{p}</Badge>)}
               </div>
             )}
           </div>

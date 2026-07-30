@@ -11,6 +11,7 @@ import { PACKS } from "@/data/companies";
 import { LEARNING_PATH } from "@/data/topics";
 import { useProgress } from "@/lib/store";
 import HeroViz from "@/components/HeroViz";
+import DailyCoach from "@/components/DailyCoach";
 import { Card, SectionTitle, Badge, Button, Empty } from "@/components/ui";
 import { cn, difficultyColor, seeded } from "@/lib/utils";
 
@@ -113,6 +114,11 @@ export default function Home() {
       </section>
 
       <div className="mx-auto max-w-6xl px-5 py-10">
+        {/* ── Daily coach ──────────────────────────────────────── */}
+        <div className="mb-12">
+          <DailyCoach />
+        </div>
+
         {/* ── Three doors ──────────────────────────────────────── */}
         <div className="mb-12 grid gap-3 md:grid-cols-3">
           <Card className="flex flex-col p-4" interactive>
