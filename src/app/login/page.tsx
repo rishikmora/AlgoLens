@@ -34,6 +34,71 @@ function GitHubMark() {
   );
 }
 
+/**
+ * Local-development sign-in.
+ *
+ * OAuth needs provider credentials configured in the Supabase dashboard, which
+ * isn't always done on a fresh clone. This gives you a way to exercise the real
+ * session pipeline in the meantime — it writes the same auth cookies the OAuth
+ * flow does, so middleware, RLS and server components behave identically.
+ *
+ * `process.env.NODE_ENV` is inlined at build time, so this whole component is
+ * dead code in a production build. Delete it once OAuth is live.
+ */
+function DevEmailSignIn() {
+  const { supabase } = useAuth();
+  const [open, setOpen] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [state, setState] = useState<string | null>(null);
+
+  if (process.env.NODE_ENV !== "development") return null;
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!supabase) return;
+    setState("Signing in…");
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) setState(error.message);
+    else window.location.href = "/dashboard";
+  }
+
+  return (
+    <div className="border-t border-hairline pt-3">
+      {!open ? (
+        <button
+          onClick={() => setOpen(true)}
+          className="text-2xs text-faint transition-colors hover:text-tertiary"
+        >
+          dev: sign in with email
+        </button>
+      ) : (
+        <form onSubmit={submit} className="space-y-2">
+          <div className="text-2xs text-faint">Development only — not built for production.</div>
+          <input
+            type="email"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="email"
+            className="h-8 w-full rounded-sm border border-edge bg-sunken px-2 text-xs text-primary outline-none focus:border-edge-strong"
+          />
+          <input
+            type="password"
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="password"
+            className="h-8 w-full rounded-sm border border-edge bg-sunken px-2 text-xs text-primary outline-none focus:border-edge-strong"
+          />
+          <Button type="submit" size="sm" variant="outline" className="w-full">Sign in</Button>
+          {state && <div className="text-2xs text-tertiary">{state}</div>}
+        </form>
+      )}
+    </div>
+  );
+}
+
 export default function LoginPage() {
   const { signInWith, user, configured, loading } = useAuth();
   const [busy, setBusy] = useState<string | null>(null);
@@ -147,6 +212,8 @@ export default function LoginPage() {
                 If a provider errors with &ldquo;provider is not enabled&rdquo;, turn it on in
                 Supabase → Authentication → Providers. Only your name, email and avatar are read.
               </p>
+
+              <DevEmailSignIn />
 
               <div className="border-t border-hairline pt-3">
                 <Link href="/problems" className="text-xs text-tertiary hover:text-signal">
