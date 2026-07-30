@@ -18,6 +18,8 @@ import {
 import { useInterviewSetup, extractProjects } from "@/lib/interviewSetup";
 import { useProgress } from "@/lib/store";
 import { useSpeech, useMicrophone, speakableText } from "@/lib/speech";
+import { useUserId } from "@/lib/auth";
+import { saveInterview } from "@/lib/db";
 import CodeEditor from "@/components/CodeEditor";
 import { Badge, Button, Card, PageHeader, ScoreBar, Markdown } from "@/components/ui";
 import { cn, fmtTime } from "@/lib/utils";
@@ -25,6 +27,7 @@ import { cn, fmtTime } from "@/lib/utils";
 export default function InterviewSessionPage() {
   const setup = useInterviewSetup();
   const { name, recordInterview } = useProgress();
+  const userId = useUserId();
 
   const pack = packById(setup.packId)!;
   const problem: Problem | undefined =
@@ -173,6 +176,22 @@ export default function InterviewSessionPage() {
       durationSec: elapsed,
       at: Date.now(),
     });
+
+    // Persist the session and its full transcript so it can be replayed later.
+    if (userId) {
+      void saveInterview({
+        userId,
+        packId: pack.id,
+        company: pack.name,
+        mode: setup.mode,
+        problemSlug: problem?.slug,
+        difficulty: problem?.difficulty,
+        report: r,
+        metrics: finalMetrics,
+        durationSec: elapsed,
+        turns: turnsRef.current,
+      });
+    }
   }
 
   const stageIdx = STAGE_ORDER.indexOf(stage);

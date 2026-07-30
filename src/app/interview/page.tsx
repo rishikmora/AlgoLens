@@ -9,6 +9,8 @@ import { PACKS } from "@/data/companies";
 import { PROBLEMS } from "@/data/problems";
 import { useInterviewSetup, extractProjects } from "@/lib/interviewSetup";
 import { useProgress } from "@/lib/store";
+import { useUserId } from "@/lib/auth";
+import { saveResume } from "@/lib/db";
 import { Badge, Button, Card, PageHeader, SectionTitle } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
@@ -23,6 +25,7 @@ export default function InterviewSetupPage() {
   const { name, interviews } = useProgress();
   const [mounted, setMounted] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const userId = useUserId();
 
   useEffect(() => {
     setMounted(true);
@@ -156,7 +159,17 @@ export default function InterviewSetupPage() {
                       setUploadError("That file is larger than 400 KB — paste the relevant sections instead.");
                       return;
                     }
-                    set({ resumeText: await file.text() });
+                    const text = await file.text();
+                    set({ resumeText: text });
+                    // Keep a versioned copy so past interviews stay reproducible.
+                    if (userId) {
+                      void saveResume({
+                        userId,
+                        content: text,
+                        filename: file.name,
+                        projects: extractProjects(text),
+                      });
+                    }
                   }}
                 />
                 <span className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-sm border border-edge bg-elevated px-3 text-sm font-medium text-primary transition-colors hover:border-edge-strong hover:bg-hover">

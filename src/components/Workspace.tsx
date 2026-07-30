@@ -13,6 +13,13 @@ import { DEFAULT_ARRAY } from "@/lib/algos";
 import { useProgress } from "@/lib/store";
 import { useWorkspace } from "@/lib/workspace";
 import { analyzePair, type PairNote } from "@/lib/ai/pair";
+import { useUserId } from "@/lib/auth";
+import {
+  recordSubmission as dbRecordSubmission,
+  saveCode as dbSaveCode,
+  fetchSavedCode,
+  touchRecentView,
+} from "@/lib/db";
 import CodeEditor, { type EditorInstance } from "./CodeEditor";
 import DebugPanel from "./DebugPanel";
 import { VizPlayer } from "./Visualizer";
@@ -53,6 +60,9 @@ export default function Workspace({ problem }: { problem: Problem }) {
   const [splitPct, setSplitPct] = useState(42);
   const [pairNotes, setPairNotes] = useState<PairNote[]>([]);
   const editorRef = useRef<EditorInstance | null>(null);
+  const userId = useUserId();
+  /** Start of this sitting — becomes duration_sec, i.e. "solved in 5 mins". */
+  const openedAt = useRef(Date.now());
 
   const { recordSubmission, saveDraft, drafts } = useProgress();
   const setWs = useWorkspace((s) => s.set);
@@ -80,9 +90,30 @@ export default function Workspace({ problem }: { problem: Problem }) {
   }, [problem.slug, code, lang, setWs]);
 
   useEffect(() => {
-    const t = setTimeout(() => saveDraft(draftKey, code), 600);
+    const t = setTimeout(() => {
+      saveDraft(draftKey, code);
+      if (userId && code.trim() && code !== problem.starter[lang]) {
+        void dbSaveCode(userId, problem.slug, lang, code);
+      }
+    }, 900);
     return () => clearTimeout(t);
-  }, [code, draftKey, saveDraft]);
+  }, [code, draftKey, saveDraft, userId, problem.slug, problem.starter, lang]);
+
+  // Remote draft wins over the local one — it may be newer, from another device.
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    fetchSavedCode(problem.slug, lang).then((remote) => {
+      if (!cancelled && remote?.trim()) setCode(remote);
+    });
+    return () => { cancelled = true; };
+  }, [userId, problem.slug, lang]);
+
+  // "Continue where you left off"
+  useEffect(() => {
+    openedAt.current = Date.now();
+    if (userId) void touchRecentView(userId, problem.slug);
+  }, [userId, problem.slug]);
 
   // Debounced so it reacts to a finished thought, not every keystroke.
   useEffect(() => {
@@ -113,12 +144,28 @@ export default function Workspace({ problem }: { problem: Problem }) {
         runtimeMs: Math.round(res.runtimeMs),
         at: Date.now(),
       });
+
+      // Persist remotely too. Fire-and-forget: a network hiccup must never
+      // block the verdict the user is waiting on.
+      if (userId) {
+        void dbRecordSubmission({
+          problemSlug: problem.slug,
+          language: lang,
+          code,
+          status: res.verdict,
+          passed: res.passed,
+          total: res.total,
+          runtimeMs: Number(res.runtimeMs.toFixed(2)),
+          memoryKb: res.memoryKb,
+          durationSec: Math.round((Date.now() - openedAt.current) / 1000),
+        });
+      }
       // An accepted solution should show itself executing, not just say "Accepted".
       if (res.verdict === "Accepted" && lang === "javascript") setBottomTab("replay");
       else if (res.verdict === "Accepted" && problem.viz) setBottomTab("viz");
       else if (res.verdict === "Accepted") setBottomTab("review");
     }
-  }, [code, lang, problem, recordSubmission]);
+  }, [code, lang, problem, recordSubmission, userId]);
 
   async function runCustom() {
     setCustomResult(null);

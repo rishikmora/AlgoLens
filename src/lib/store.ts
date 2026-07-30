@@ -39,6 +39,10 @@ interface ProgressState {
   streak: number;
   lastActiveDay: string | null;
   drafts: Record<string, string>;
+  /** Set once auth resolves. null means local-only mode. */
+  userId: string | null;
+  /** True once remote state has replaced the local cache for this user. */
+  hydrated: boolean;
 
   setName: (n: string) => void;
   recordSubmission: (s: Submission) => void;
@@ -46,6 +50,9 @@ interface ProgressState {
   recordInterview: (r: InterviewRecord) => void;
   touchStreak: () => void;
   reset: () => void;
+  setUserId: (id: string | null) => void;
+  hydrateRemote: (patch: Partial<Pick<ProgressState,
+    "solved" | "attempted" | "submissions" | "interviews" | "xp" | "coins" | "streak" | "name">>) => void;
 }
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -65,6 +72,14 @@ export const useProgress = create<ProgressState>()(
       streak: 0,
       lastActiveDay: null,
       drafts: {},
+      userId: null,
+      hydrated: false,
+
+      setUserId: (userId) =>
+        set((st) => (st.userId === userId ? {} : { userId, hydrated: false })),
+
+      /** Remote is authoritative once signed in — it replaces, never merges. */
+      hydrateRemote: (patch) => set({ ...patch, hydrated: true }),
 
       setName: (name) => set({ name }),
 
@@ -106,9 +121,19 @@ export const useProgress = create<ProgressState>()(
         set({
           solved: {}, attempted: [], submissions: [], interviews: [],
           xp: 0, coins: 0, streak: 0, lastActiveDay: null, drafts: {},
+          hydrated: false,
         }),
     }),
-    { name: "rishalgo-progress" },
+    {
+      name: "rishalgo-progress",
+      // userId/hydrated are session facts, not progress — never persist them.
+      partialize: (s) => {
+        const { userId: _userId, hydrated: _hydrated, ...rest } = s;
+        void _userId;
+        void _hydrated;
+        return rest;
+      },
+    },
   ),
 );
 

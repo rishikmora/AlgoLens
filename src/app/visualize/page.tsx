@@ -1,7 +1,11 @@
 "use client";
 
-import { useState } from "react";
-import { Shuffle, ArrowDownWideNarrow, ArrowUpNarrowWide } from "lucide-react";
+import { useEffect, useState } from "react";
+import {
+  Shuffle, ArrowDownWideNarrow, ArrowUpNarrowWide, Bookmark, Check,
+} from "lucide-react";
+import { useUserId } from "@/lib/auth";
+import { saveVisualization } from "@/lib/db";
 import { ALGOS, DEFAULT_ARRAY, randomArray, type VizAlgo } from "@/lib/algos";
 import { VizPlayer } from "@/components/Visualizer";
 import { Badge, Button, Card, PageHeader } from "@/components/ui";
@@ -13,6 +17,42 @@ export default function VisualizePage() {
   const [algo, setAlgo] = useState<VizAlgo>(ALGOS[0]);
   const [input, setInput] = useState<number[]>(DEFAULT_ARRAY);
   const [size, setSize] = useState(10);
+  const [saved, setSaved] = useState(false);
+  const userId = useUserId();
+
+  // Deep link from History → Replay: ?algo=merge-sort&input=[…]
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("algo");
+    const raw = params.get("input");
+    const found = id ? ALGOS.find((a) => a.id === id) : null;
+    if (found) setAlgo(found);
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.every((n) => typeof n === "number") && parsed.length) {
+          setInput(parsed);
+          setSize(parsed.length);
+        }
+      } catch {
+        /* malformed link — keep the default input */
+      }
+    }
+  }, []);
+
+  async function save() {
+    if (!userId) return;
+    const steps = algo.run(input).length;
+    await saveVisualization({
+      userId,
+      algorithmId: algo.id,
+      algorithmName: algo.name,
+      input,
+      stepCount: steps,
+    });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2200);
+  }
 
   const usesArray = algo.render === "bars";
 
@@ -56,9 +96,15 @@ export default function VisualizePage() {
                 <h2 className="text-[15px] font-medium">{algo.name}</h2>
                 <p className="text-[12.5px] text-ink2">{algo.blurb}</p>
               </div>
-              <div className="flex gap-1.5">
-                <Badge tone="lime">Time {algo.time}</Badge>
-                <Badge tone="violet">Space {algo.space}</Badge>
+              <div className="flex items-center gap-1.5">
+                <Badge tone="signal">Time {algo.time}</Badge>
+                <Badge tone="ai">Space {algo.space}</Badge>
+                {userId && (
+                  <Button size="sm" variant="outline" onClick={save} className="ml-1">
+                    {saved ? <Check className="text-signal" /> : <Bookmark />}
+                    {saved ? "Saved" : "Save run"}
+                  </Button>
+                )}
               </div>
             </div>
 

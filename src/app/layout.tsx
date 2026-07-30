@@ -3,6 +3,8 @@ import { Inter, Instrument_Serif, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import Shell from "@/components/Shell";
 import AITutor from "@/components/AITutor";
+import SyncGate from "@/components/SyncGate";
+import { AuthProvider } from "@/lib/auth";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -47,8 +49,11 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT }} />
       </head>
       <body className="antialiased">
-        <Shell>{children}</Shell>
-        <AITutor />
+        <AuthProvider>
+          <SyncGate />
+          <Shell>{children}</Shell>
+          <AITutor />
+        </AuthProvider>
       </body>
     </html>
   );

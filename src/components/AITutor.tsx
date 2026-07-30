@@ -6,6 +6,8 @@ import { Sparkles, X, ArrowUp, Lightbulb } from "lucide-react";
 import { askTutor, aiStatus } from "@/lib/ai/client";
 import { QUICK_PROMPTS } from "@/lib/ai/tutor";
 import { useWorkspace } from "@/lib/workspace";
+import { useUserId } from "@/lib/auth";
+import { createChat, appendChatMessage, recordHint } from "@/lib/db";
 import { Markdown, Badge } from "./ui";
 import { cn } from "@/lib/utils";
 
@@ -25,6 +27,12 @@ export default function AITutor() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const { slug, code, hintLevel, bumpHint } = useWorkspace();
+  const userId = useUserId();
+  /** One chat thread per open panel session, created lazily on first message. */
+  const [chatId, setChatId] = useState<string | null>(null);
+
+  // A new problem is a new conversation.
+  useEffect(() => { setChatId(null); setMsgs([]); }, [slug]);
 
   useEffect(() => {
     if (open && !status) aiStatus().then(setStatus);
@@ -42,6 +50,16 @@ export default function AITutor() {
     setInput("");
     setBusy(true);
 
+    // Open a chat on the first message; the question becomes its title.
+    let activeChat = chatId;
+    if (userId && !activeChat) {
+      activeChat = await createChat(userId, question, slug ?? undefined);
+      setChatId(activeChat);
+    }
+    if (activeChat) {
+      void appendChatMessage({ chatId: activeChat, role: "user", content: question });
+    }
+
     const res = await askTutor({
       question,
       problemSlug: slug ?? undefined,
@@ -49,9 +67,22 @@ export default function AITutor() {
       hintLevel,
     });
 
-    if (isHint) bumpHint();
+    if (isHint) {
+      bumpHint();
+      if (userId && slug) void recordHint(userId, slug, hintLevel);
+    }
     setMsgs((m) => [...m, { role: "tutor", text: res.text, source: res.source }]);
     setBusy(false);
+
+    if (activeChat) {
+      void appendChatMessage({
+        chatId: activeChat,
+        role: "tutor",
+        content: res.text,
+        source: res.source,
+        hintLevel: isHint ? hintLevel : undefined,
+      });
+    }
   }
 
   return (

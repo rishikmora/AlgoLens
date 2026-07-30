@@ -11,14 +11,35 @@ npm install
 npm run dev     # http://localhost:3000
 ```
 
-Optional — enable model-generated tutoring and interviewing:
+`.env.local` already points at the project's Supabase instance. To enable model-generated
+tutoring and interviewing, add `ANTHROPIC_API_KEY` to it — without a key everything still
+runs on a built-in deterministic engine. The only feature that hard-requires the key is
+whiteboard vision, which says so rather than guessing.
 
-```bash
-cp .env.example .env.local   # then add ANTHROPIC_API_KEY
-```
+## One manual step: turn on the OAuth providers
 
-Without a key everything still runs on a built-in deterministic engine. The only feature
-that hard-requires the key is whiteboard vision, which says so rather than guessing.
+Sign-in is fully wired but **Google and GitHub are disabled on the Supabase project**, and
+enabling them needs OAuth credentials that only you can create. Until then the login page
+renders and reports the provider error honestly.
+
+**Google**
+1. [Google Cloud Console](https://console.cloud.google.com/apis/credentials) → *Create
+   credentials* → *OAuth client ID* → *Web application*.
+2. Authorized redirect URI:
+   `https://tdhjywyfaciqbgxawrqk.supabase.co/auth/v1/callback`
+3. Supabase → *Authentication* → *Providers* → *Google* → paste the Client ID and Secret →
+   enable.
+
+**GitHub**
+1. GitHub → *Settings* → *Developer settings* → *OAuth Apps* → *New OAuth App*.
+2. Authorization callback URL: the same Supabase URL above.
+3. Supabase → *Authentication* → *Providers* → *GitHub* → paste → enable.
+
+**Both**: Supabase → *Authentication* → *URL Configuration* → add
+`http://localhost:3000/auth/callback` (and your deployed equivalent) to *Redirect URLs*.
+
+Nothing else changes — `/auth/callback` already exchanges the code for a session, and the
+signup trigger provisions the user's rows automatically.
 
 ---
 
@@ -155,12 +176,17 @@ optimization → follow-up → behavioral → wrap-up — with:
   per-company readiness bars, XP/levels/coins/streak/badges.
 - `/learn` — a 14-topic roadmap as a prerequisite DAG that unlocks as you solve.
 - `/contests` — upcoming, virtual rounds, rating history, leaderboard.
+- `/history` — every submission grouped per problem as an attempt chain (Wrong Answer →
+  Accepted, with the code from each attempt), interview transcripts you can replay,
+  AI chat history, and saved visualizations that re-run from a deep link.
+- `/login` — Google and GitHub OAuth.
 - `/profile` and `/profile/<handle>` — shareable recruiter-facing profile.
 - `/whiteboard` — canvas sketching with **Claude vision** reading the drawing back to you,
   then asking *you* a question about it rather than just narrating.
 - `/admin` — content and model configuration (read-only).
 
-Progress persists to `localStorage`; interview setup to `sessionStorage`.
+Signed in, all of this persists to Supabase. Signed out, progress falls back to
+`localStorage`; interview setup always uses `sessionStorage`.
 
 ---
 
@@ -172,9 +198,8 @@ gap is.
 | Feature | What's missing | Where it surfaces |
 |---|---|---|
 | **Python / C++ / Java / Go / Rust execution** | Docker sandbox judge service | Selecting the language shows "no local runtime"; Submit returns `Needs Sandbox` with an explanation |
-| **FastAPI + Postgres + Redis + Celery backend** | The whole service tier | Progress is local-only |
-| **Auth (Clerk/Supabase, OAuth)** | — | Profile is local; no real public URL |
-| **Community discussion** | Backend + auth | Discussion tab says so; sample threads are dimmed |
+| **Redis / Celery** | Caching + background jobs | Not needed yet at this scale |
+| **Community discussion** | Comment tables + moderation | Discussion tab says so; sample threads are dimmed |
 | **Live contests** | Scheduler + backend | Contest history is labelled seeded demo data |
 | **RAG over algorithm explanations** | Vector store | Tutor uses the problem's own editorial instead |
 | **PDF resume upload** | A server-side PDF text extractor | Upload accepts `.txt`/`.md`; a `.pdf` is refused with an explanation rather than silently failing |
@@ -222,6 +247,79 @@ src/
 was ported to TypeScript as `src/lib/interpreter.ts`; the file is kept for reference and is
 not part of the build.
 
+## Backend — Supabase
+
+A dedicated project (`RishAlgo AI`, ref `tdhjywyfaciqbgxawrqk`, ap-south-1) holds everything
+user-scoped. The judge stays independent of it: code still executes in a client-side Web
+Worker and never touches the user database.
+
+### Auth flow
+
+```
+Login → Google / GitHub OAuth → Supabase Auth → session cookie
+      → middleware refreshes the JWT on every request
+      → RLS enforces per-user isolation inside Postgres
+```
+
+`src/middleware.ts` refreshes the session; `/auth/callback` exchanges the OAuth code;
+`getUser()` in `src/lib/supabase/server.ts` *validates* the JWT rather than trusting the
+cookie. A Postgres trigger (`handle_new_user`) provisions the profile, progress and
+settings rows on signup, deriving a URL-safe handle from the email and de-duplicating it.
+
+### Tables
+
+| Group | Tables |
+|---|---|
+| Identity | `profiles` (extends `auth.users`), `user_settings` |
+| Progress | `progress`, `badges`, `roadmap_progress` |
+| Catalogue | `problems` (public read, no client writes) |
+| Coding | `submissions`, `saved_code`, `problem_notes`, `bookmarks`, `recent_views`, `custom_test_cases`, `hints_used` |
+| Interviews | `interview_sessions`, `interview_messages` |
+| AI | `ai_chats`, `ai_chat_messages` |
+| Artifacts | `saved_visualizations`, `resumes`, `certificates`, `contest_results` |
+
+There is no separate `users` table — `auth.users` *is* it, and `profiles` extends it 1:1.
+Duplicating id/email/name into a second table just creates two things to keep in sync.
+
+### Security
+
+**RLS is enabled on every user table**, with policies written as
+`(select auth.uid()) = user_id` so the function is evaluated once per statement rather than
+once per row. `profiles` is the only table readable by anonymous visitors, and only where
+`is_public` is true — the recruiter view. `resumes` is never publicly readable.
+
+`record_submission()` is the one RPC clients call. It inserts the attempt and updates
+progress in a single transaction, and **derives XP from the catalogue's own difficulty
+column**, so a client cannot award itself points by editing the request body. It runs
+`SECURITY INVOKER`, so RLS still applies inside it. The two `SECURITY DEFINER` trigger
+helpers have had `EXECUTE` revoked from `anon` and `authenticated` — otherwise they'd be
+callable over `/rest/v1/rpc`.
+
+Verified against the live database:
+
+| Attempt | Result |
+|---|---|
+| anon `SELECT` on `submissions` / `profiles` | `[]` — no leakage |
+| anon `INSERT` into `submissions` | `401` RLS violation |
+| anon `INSERT` into `problems` (catalogue tamper) | `401` RLS violation |
+| anon `POST /rpc/touch_updated_at` | `404` — not exposed |
+| anon `POST /rpc/record_submission` | `401` permission denied |
+| authenticated user inserting a row owned by another `user_id` | blocked, 0 rows written |
+| XP: first Medium accept → repeat accept → wrong answer | `60 → +5 → +0` = 65, `medium` counted once |
+
+### Signed out
+
+Everything still works. The app falls back to the persisted zustand store in
+`localStorage`, and `src/components/SyncGate.tsx` swaps in remote state once a user
+resolves — the database is authoritative, so a stale browser can't inflate anyone's XP.
+
+### Where FastAPI would go
+
+`src/lib/db.ts` is the single data-access seam. With RLS doing per-user isolation in
+Postgres, simple CRUD needs no backend at all. A FastAPI service earns its place when you
+move the **judge** (Docker sandbox, multi-language execution) and the **AI calls** server
+side; it would verify the same Supabase JWTs and the schema would not change.
+
 ## Design system
 
 All colour lives in `src/app/globals.css` as semantic tokens (`--color-base`,
@@ -245,6 +343,13 @@ arbitrary sizes.
 
 ## Stack
 
-Next.js 15 · React 19 · TypeScript 5 · Tailwind CSS 4 · Monaco Editor · Framer Motion ·
-Zustand · Anthropic SDK. No D3/Three.js — the visualizations are hand-rolled SVG and CSS,
-and the fonts are self-hosted by `next/font`, which keeps the bundle at ~103 kB shared JS.
+Next.js 15 · React 19 · TypeScript 5 · Tailwind CSS 4 · Supabase (Postgres, Auth, RLS) ·
+Monaco Editor · Framer Motion · Zustand · Anthropic SDK. No D3/Three.js — the
+visualizations are hand-rolled SVG and CSS, and the fonts are self-hosted by `next/font`,
+which keeps the bundle at ~103 kB shared JS.
+
+Regenerate database types after any migration:
+
+```bash
+npx supabase gen types typescript --project-id tdhjywyfaciqbgxawrqk > src/lib/supabase/types.ts
+```
