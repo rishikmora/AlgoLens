@@ -15,10 +15,13 @@ interface AuthState {
   loading: boolean;
   configured: boolean;
   supabase: SupabaseClient<Database> | null;
-  signInWith: (provider: "google" | "github", next?: string) => Promise<void>;
+  signInWith: (provider: OAuthProvider, next?: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
+
+/** The OAuth providers this app offers. */
+export type OAuthProvider = "github";
 
 const Ctx = createContext<AuthState | null>(null);
 
@@ -70,18 +73,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [supabase, loadProfile]);
 
   const signInWith = useCallback(
-    async (provider: "google" | "github", next = "/dashboard") => {
+    async (provider: OAuthProvider, next = "/dashboard") => {
       if (!supabase) return;
-      await supabase.auth.signInWithOAuth({
+      const { error } = await supabase.auth.signInWithOAuth({
         provider,
         options: {
           redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
-          // Ask Google for a refresh token so long sessions survive.
-          queryParams: provider === "google"
-            ? { access_type: "offline", prompt: "consent" }
-            : undefined,
+          scopes: "read:user user:email",
         },
       });
+      // signInWithOAuth normally redirects; reaching here with an error means
+      // the provider is disabled on the project, so surface it rather than
+      // leaving the button looking broken.
+      if (error) throw error;
     },
     [supabase],
   );

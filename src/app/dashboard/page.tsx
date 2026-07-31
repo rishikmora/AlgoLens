@@ -6,6 +6,7 @@ import { Flame, Coins, Zap, Trophy, Mic, Target, RotateCcw } from "lucide-react"
 import { PROBLEMS, ALL_TOPICS, ALL_COMPANIES, type Difficulty } from "@/data/problems";
 import { PACKS } from "@/data/companies";
 import { useProgress, levelFor, BADGES, earnedBadges } from "@/lib/store";
+import StorageNotice from "@/components/StorageNotice";
 import { Badge, Button, Card, PageHeader, ScoreBar, SectionTitle, Stat, Empty } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
@@ -106,6 +107,8 @@ export default function DashboardPage() {
           </>
         }
       />
+
+      <StorageNotice className="mb-5" />
 
       {/* Top stats */}
       <div className="mb-6 grid gap-2 sm:grid-cols-3 lg:grid-cols-6">

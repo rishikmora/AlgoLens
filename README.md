@@ -16,30 +16,54 @@ tutoring and interviewing, add `ANTHROPIC_API_KEY` to it — without a key every
 runs on a built-in deterministic engine. The only feature that hard-requires the key is
 whiteboard vision, which says so rather than guessing.
 
-## One manual step: turn on the OAuth providers
+## Signing in
 
-Sign-in is fully wired but **Google and GitHub are disabled on the Supabase project**, and
-enabling them needs OAuth credentials that only you can create. Until then the login page
-renders and reports the provider error honestly.
+GitHub is the only OAuth provider. **It needs switching on in the Supabase dashboard** —
+that takes a Client ID and Secret, which only you can create. Until then the login page
+detects the disabled provider, greys the button out, and prints these steps inline rather
+than failing silently:
 
-**Google**
-1. [Google Cloud Console](https://console.cloud.google.com/apis/credentials) → *Create
-   credentials* → *OAuth client ID* → *Web application*.
-2. Authorized redirect URI:
+1. [GitHub → Developer settings → OAuth Apps → New OAuth App](https://github.com/settings/developers)
+2. **Homepage URL**: `http://localhost:3000`
+3. **Authorization callback URL**:
    `https://tdhjywyfaciqbgxawrqk.supabase.co/auth/v1/callback`
-3. Supabase → *Authentication* → *Providers* → *Google* → paste the Client ID and Secret →
-   enable.
-
-**GitHub**
-1. GitHub → *Settings* → *Developer settings* → *OAuth Apps* → *New OAuth App*.
-2. Authorization callback URL: the same Supabase URL above.
-3. Supabase → *Authentication* → *Providers* → *GitHub* → paste → enable.
-
-**Both**: Supabase → *Authentication* → *URL Configuration* → add
-`http://localhost:3000/auth/callback` (and your deployed equivalent) to *Redirect URLs*.
+4. [Supabase → Authentication → Providers → GitHub](https://supabase.com/dashboard/project/tdhjywyfaciqbgxawrqk/auth/providers)
+   → paste both → Enable
+5. [Supabase → Authentication → URL Configuration](https://supabase.com/dashboard/project/tdhjywyfaciqbgxawrqk/auth/url-configuration)
+   → *Redirect URLs* → add `http://localhost:3000/auth/callback` (and your deployed equivalent)
 
 Nothing else changes — `/auth/callback` already exchanges the code for a session, and the
 signup trigger provisions the user's rows automatically.
+
+### Local development account
+
+So you don't have to wait for the above, a dev-only email sign-in sits under the GitHub
+button (`dev: sign in with email`), with a pre-made account:
+
+```
+dev@rishalgo.local  /  devpassword
+```
+
+It writes the same auth cookies OAuth does, so middleware, RLS and server components behave
+identically. Both the form and the account are development-only — the component is compiled
+out of production builds, and you can drop the account with:
+
+```sql
+delete from auth.users where email = 'dev@rishalgo.local';
+```
+
+### "Nothing is appearing in my tables"
+
+Almost always: **you are signed out.** The app is designed to work without an account, and
+signed out it writes to `localStorage` only — so the database stays empty and looks
+disconnected. The dashboard now states which mode you are in:
+
+- *Saving to this browser only* — signed out, nothing reaches Postgres
+- *Synced to your account* — signed in, writes are landing
+
+A quick way to prove the connection independently of auth: `public.problems` is seeded with
+9 rows by migration and is readable anonymously. If you can see those, the connection is
+fine and the issue is that no user has signed in.
 
 ---
 
@@ -179,7 +203,7 @@ optimization → follow-up → behavioral → wrap-up — with:
 - `/history` — every submission grouped per problem as an attempt chain (Wrong Answer →
   Accepted, with the code from each attempt), interview transcripts you can replay,
   AI chat history, and saved visualizations that re-run from a deep link.
-- `/login` — Google and GitHub OAuth.
+- `/login` — GitHub OAuth, with live provider-status detection.
 - `/profile` and `/profile/<handle>` — shareable recruiter-facing profile.
 - `/whiteboard` — canvas sketching with **Claude vision** reading the drawing back to you,
   then asking *you* a question about it rather than just narrating.
@@ -256,7 +280,7 @@ Worker and never touches the user database.
 ### Auth flow
 
 ```
-Login → Google / GitHub OAuth → Supabase Auth → session cookie
+Login → GitHub OAuth → Supabase Auth → session cookie
       → middleware refreshes the JWT on every request
       → RLS enforces per-user isolation inside Postgres
 ```

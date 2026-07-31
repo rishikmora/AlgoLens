@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ArrowRight, TriangleAlert, Check } from "lucide-react";
+import { ArrowRight, TriangleAlert, Check, ExternalLink } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { Button, Card } from "@/components/ui";
 
@@ -14,21 +14,13 @@ const PERKS = [
   "Streaks, XP and badges that follow you across devices",
 ];
 
-/** Inline brand marks — lucide dropped its brand icons in v1. */
-function GoogleMark() {
-  return (
-    <svg viewBox="0 0 24 24" className="size-4" aria-hidden="true">
-      <path fill="#4285F4" d="M23.06 12.25c0-.82-.07-1.6-.21-2.36H12v4.47h6.2a5.3 5.3 0 0 1-2.3 3.48v2.9h3.72c2.18-2 3.44-4.96 3.44-8.49Z" />
-      <path fill="#34A853" d="M12 24c3.11 0 5.72-1.03 7.62-2.79l-3.72-2.89c-1.03.69-2.35 1.1-3.9 1.1-3 0-5.54-2.03-6.45-4.75H1.7v2.99A11.5 11.5 0 0 0 12 24Z" />
-      <path fill="#FBBC05" d="M5.55 14.67a6.9 6.9 0 0 1 0-4.4V7.29H1.7a11.51 11.51 0 0 0 0 10.37l3.85-3Z" />
-      <path fill="#EA4335" d="M12 4.75c1.69 0 3.21.58 4.4 1.72l3.3-3.29C17.71 1.2 15.1 0 12 0 7.5 0 3.62 2.58 1.7 6.34l3.85 3C6.46 6.78 9 4.75 12 4.75Z" />
-    </svg>
-  );
-}
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+const PROJECT_REF = SUPABASE_URL.replace(/^https:\/\//, "").split(".")[0];
 
-function GitHubMark() {
+/** lucide dropped brand icons in v1, so the mark is inline. */
+function GitHubMark({ className = "size-4" }: { className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" className="size-4 fill-current" aria-hidden="true">
+    <svg viewBox="0 0 24 24" className={`${className} fill-current`} aria-hidden="true">
       <path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.26.8-.57v-2c-3.34.72-4.04-1.6-4.04-1.6-.54-1.39-1.33-1.76-1.33-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.8 1.31 3.49 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.81 1.1.81 2.22v3.29c0 .31.2.68.82.57A12 12 0 0 0 12 .3Z" />
     </svg>
   );
@@ -37,13 +29,12 @@ function GitHubMark() {
 /**
  * Local-development sign-in.
  *
- * OAuth needs provider credentials configured in the Supabase dashboard, which
- * isn't always done on a fresh clone. This gives you a way to exercise the real
- * session pipeline in the meantime — it writes the same auth cookies the OAuth
- * flow does, so middleware, RLS and server components behave identically.
+ * Lets you exercise the real session pipeline before the GitHub provider is
+ * configured — it writes the same auth cookies OAuth does, so middleware, RLS
+ * and server components behave identically.
  *
- * `process.env.NODE_ENV` is inlined at build time, so this whole component is
- * dead code in a production build. Delete it once OAuth is live.
+ * `process.env.NODE_ENV` is inlined at build time, so this is dead code in a
+ * production build. Delete it once OAuth is live.
  */
 function DevEmailSignIn() {
   const { supabase } = useAuth();
@@ -76,19 +67,13 @@ function DevEmailSignIn() {
         <form onSubmit={submit} className="space-y-2">
           <div className="text-2xs text-faint">Development only — not built for production.</div>
           <input
-            type="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="email"
+            type="email" required value={email}
+            onChange={(e) => setEmail(e.target.value)} placeholder="email"
             className="h-8 w-full rounded-sm border border-edge bg-sunken px-2 text-xs text-primary outline-none focus:border-edge-strong"
           />
           <input
-            type="password"
-            required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="password"
+            type="password" required value={password}
+            onChange={(e) => setPassword(e.target.value)} placeholder="password"
             className="h-8 w-full rounded-sm border border-edge bg-sunken px-2 text-xs text-primary outline-none focus:border-edge-strong"
           />
           <Button type="submit" size="sm" variant="outline" className="w-full">Sign in</Button>
@@ -99,11 +84,84 @@ function DevEmailSignIn() {
   );
 }
 
+/** Tells the user precisely why the button won't work, instead of failing silently. */
+function ProviderSetupNotice() {
+  return (
+    <div className="space-y-2.5 rounded-md border border-warn/30 bg-warn/10 p-3">
+      <div className="flex items-start gap-2">
+        <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warn" />
+        <div className="text-sm leading-relaxed text-secondary">
+          <strong className="text-primary">GitHub sign-in isn&apos;t enabled yet.</strong> The
+          database is connected and the code is wired — the provider just needs switching on,
+          which takes a Client ID and Secret only you can create.
+        </div>
+      </div>
+
+      <ol className="space-y-1.5 pl-1 text-xs leading-relaxed text-secondary">
+        <li>
+          <span className="text-faint">1.</span>{" "}
+          <a
+            href="https://github.com/settings/developers"
+            target="_blank" rel="noreferrer"
+            className="text-signal hover:underline"
+          >
+            GitHub → Developer settings → OAuth Apps → New OAuth App
+            <ExternalLink className="ml-0.5 inline size-3" />
+          </a>
+        </li>
+        <li>
+          <span className="text-faint">2.</span> Homepage URL{" "}
+          <code className="rounded-xs bg-elevated px-1 font-mono text-2xs">http://localhost:3000</code>
+        </li>
+        <li>
+          <span className="text-faint">3.</span> Authorization callback URL
+          <code className="mt-1 block overflow-x-auto rounded-xs bg-elevated px-1.5 py-1 font-mono text-2xs text-primary">
+            {SUPABASE_URL}/auth/v1/callback
+          </code>
+        </li>
+        <li>
+          <span className="text-faint">4.</span>{" "}
+          <a
+            href={`https://supabase.com/dashboard/project/${PROJECT_REF}/auth/providers`}
+            target="_blank" rel="noreferrer"
+            className="text-signal hover:underline"
+          >
+            Supabase → Authentication → Providers → GitHub
+            <ExternalLink className="ml-0.5 inline size-3" />
+          </a>{" "}
+          → paste both → Enable
+        </li>
+        <li>
+          <span className="text-faint">5.</span>{" "}
+          <a
+            href={`https://supabase.com/dashboard/project/${PROJECT_REF}/auth/url-configuration`}
+            target="_blank" rel="noreferrer"
+            className="text-signal hover:underline"
+          >
+            URL Configuration
+            <ExternalLink className="ml-0.5 inline size-3" />
+          </a>{" "}
+          → Redirect URLs → add{" "}
+          <code className="rounded-xs bg-elevated px-1 font-mono text-2xs">
+            http://localhost:3000/auth/callback
+          </code>
+        </li>
+      </ol>
+
+      <p className="text-2xs text-faint">
+        Nothing else changes — this page picks it up as soon as the provider is on.
+      </p>
+    </div>
+  );
+}
+
 export default function LoginPage() {
   const { signInWith, user, configured, loading } = useAuth();
-  const [busy, setBusy] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [next, setNext] = useState("/dashboard");
+  /** null = still checking. */
+  const [githubEnabled, setGithubEnabled] = useState<boolean | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -112,14 +170,28 @@ export default function LoginPage() {
     if (n?.startsWith("/") && !n.startsWith("//")) setNext(n);
   }, []);
 
-  async function go(provider: "google" | "github") {
-    setBusy(provider);
+  // Ask the project which providers are live, so a disabled one is diagnosed
+  // up front rather than after a dead-end redirect.
+  useEffect(() => {
+    if (!configured) return;
+    let cancelled = false;
+    fetch(`${SUPABASE_URL}/auth/v1/settings`, {
+      headers: { apikey: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY! },
+    })
+      .then((r) => r.json())
+      .then((j) => { if (!cancelled) setGithubEnabled(Boolean(j?.external?.github)); })
+      .catch(() => { if (!cancelled) setGithubEnabled(null); });
+    return () => { cancelled = true; };
+  }, [configured]);
+
+  async function go() {
+    setBusy(true);
     setError(null);
     try {
-      await signInWith(provider, next);
+      await signInWith("github", next);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-      setBusy(null);
+      setBusy(false);
     }
   }
 
@@ -165,9 +237,6 @@ export default function LoginPage() {
                   and restart the dev server.
                 </div>
               </div>
-              <p className="text-sm text-tertiary">
-                The app still works signed out — progress just stays in this browser.
-              </p>
               <Link href="/problems">
                 <Button variant="outline">Continue without an account <ArrowRight /></Button>
               </Link>
@@ -180,26 +249,23 @@ export default function LoginPage() {
               </Link>
             </div>
           ) : (
-            <div className="space-y-3">
-              <h2 className="font-display text-xl text-primary">Continue with</h2>
+            <div className="space-y-4">
+              <h2 className="font-display text-xl text-primary">Continue with GitHub</h2>
 
               <button
-                onClick={() => go("google")}
-                disabled={Boolean(busy) || loading}
-                className="flex h-11 w-full items-center justify-center gap-2.5 rounded-md border border-edge bg-elevated text-sm font-medium text-primary transition-colors hover:border-edge-strong hover:bg-hover disabled:opacity-50"
-              >
-                <GoogleMark />
-                {busy === "google" ? "Redirecting…" : "Google"}
-              </button>
-
-              <button
-                onClick={() => go("github")}
-                disabled={Boolean(busy) || loading}
-                className="flex h-11 w-full items-center justify-center gap-2.5 rounded-md border border-edge bg-elevated text-sm font-medium text-primary transition-colors hover:border-edge-strong hover:bg-hover disabled:opacity-50"
+                onClick={go}
+                disabled={busy || loading || githubEnabled === false}
+                className="flex h-11 w-full items-center justify-center gap-2.5 rounded-md border border-edge bg-elevated text-sm font-medium text-primary transition-colors hover:border-edge-strong hover:bg-hover disabled:cursor-not-allowed disabled:opacity-45"
               >
                 <GitHubMark />
-                {busy === "github" ? "Redirecting…" : "GitHub"}
+                {busy ? "Redirecting…" : "Sign in with GitHub"}
               </button>
+
+              {githubEnabled === false && <ProviderSetupNotice />}
+
+              {githubEnabled === null && (
+                <p className="text-2xs text-faint">Checking provider status…</p>
+              )}
 
               {error && (
                 <div className="flex items-start gap-2 rounded-md border border-danger/30 bg-danger/10 p-2.5 text-xs text-danger">
@@ -207,11 +273,6 @@ export default function LoginPage() {
                   <span>{error}</span>
                 </div>
               )}
-
-              <p className="pt-1 text-2xs leading-relaxed text-faint">
-                If a provider errors with &ldquo;provider is not enabled&rdquo;, turn it on in
-                Supabase → Authentication → Providers. Only your name, email and avatar are read.
-              </p>
 
               <DevEmailSignIn />
 
